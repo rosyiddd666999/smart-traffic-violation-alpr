@@ -8,8 +8,9 @@ deployment.
 
 The application ships with the official Ultralytics **`yolo11n.pt` COCO
 checkpoint**. It is not fine-tuned on the reference deployment, and the
-repository contains no custom training run, training curves, or confusion
-matrix for the deployed model.
+repository contains no custom training run or training curves. The only
+published confusion matrix is the COCO val2017 one in
+[`model-evaluation.md`](model-evaluation.md); there is no domain matrix.
 
 The app filters the COCO model to four classes:
 
