@@ -1,0 +1,23 @@
+# Four-class traffic fine-tuning template.
+#
+# Layout expected by Ultralytics:
+#   /datasets/traffic/
+#     images/train/*.jpg   labels/train/*.txt
+#     images/val/*.jpg     labels/val/*.txt
+#
+# Copy this file to configs/traffic-data.yaml and edit `path`. Keep the dataset
+# outside git: raw footage and labelled plates must never be committed.
+#
+# Class IDs are 0-3 here. The shipped app uses COCO IDs 2, 3, 5, 7. If you
+# fine-tune with this file, update DEFAULT_CLASSES / the dashboard class values
+# to 0-3 (or add a mapping in pipeline.py). See docs/training.md.
+
+path: /datasets/traffic
+train: images/train
+val: images/val
+
+names:
+  0: car
+  1: motorcycle
+  2: bus
+  3: truck

@@ -19,7 +19,18 @@ Tunnel in front. It runs on a 4 GB GTX 1050 Ti.
 
 ## Demo
 
-[![Evidence detail](docs/assets/screenshots/evidence-detail.png)](docs/assets/screenshots/evidence-detail.png)
+| Upload and zone editor | Results and job history |
+|:---:|:---:|
+| [![Dashboard upload and zone editor](docs/assets/screenshots/dashboard-upload.png)](docs/assets/screenshots/dashboard-upload.png) | [![Dashboard results and history](docs/assets/screenshots/dashboard-results.png)](docs/assets/screenshots/dashboard-results.png) |
+
+Draw the forbidden polygon on the video, pick the vehicle classes, watch live
+progress, then review searchable evidence and export CSV — all from one local
+page.
+
+[![Evidence detail](docs/assets/screenshots/evidence-detail.jpg)](docs/assets/screenshots/evidence-detail.jpg)
+
+*Evidence JPEG from a real demo run. The plate pixels are redacted and the OCR
+headline is a synthetic placeholder; the original plate is not in the repo.*
 
 [▶ Watch the annotated demo (720p, 1.3 MB)](docs/assets/videos/demo-detection-720p.mp4) ·
 [Download the synthetic input clip](docs/assets/videos/sample-traffic.mp4)
@@ -211,6 +222,36 @@ not provide `sm_61` kernels. Newer GPUs can set `OCR_GPU=true`.
 
 ---
 
+## Model evaluation
+
+The shipped detector is the official COCO-pretrained **`yolo11n.pt`**, filtered
+to four classes (`car`, `motorcycle`, `bus`, `truck`). It is **not** fine-tuned
+on this deployment. As a reproducibility and sanity check, the checkpoint was
+evaluated on COCO val2017: 5,000 images, 2,982 instances of the four selected
+classes.
+
+| Class | P | R | F1 | AP50 | AP50-95 |
+|---|---:|---:|---:|---:|---:|
+| car | 0.6914 | 0.5193 | 0.5931 | 0.5822 | 0.3719 |
+| motorcycle | 0.7817 | 0.5831 | 0.6680 | 0.6738 | 0.4415 |
+| bus | 0.8051 | 0.7032 | 0.7507 | 0.7720 | 0.6479 |
+| truck | 0.6129 | 0.4082 | 0.4900 | 0.4764 | 0.3205 |
+| **macro** | **0.7228** | **0.5534** | **0.6255** | **0.6261** | **0.4455** |
+
+Precision, recall and F1 are per-class best-F1 values (each at its own confidence
+threshold); AP is threshold-independent. The macro row is the mean of the four
+classes, so `mAP50 = 0.6261`.
+
+Read this as **"the checkpoint and the evaluation harness work"**, not as traffic
+accuracy. COCO is daylight, high-resolution and web-sourced; this deployment is
+fixed-camera CCTV, often compressed, at night, with small plates. No labelled
+traffic validation set exists yet, so no domain F1/mAP is claimed.
+
+Method, command, weights SHA-256, PR/F1 curves and confusion matrix:
+[`docs/model-evaluation.md`](docs/model-evaluation.md).
+
+---
+
 ## Project layout
 
 ```text
@@ -219,9 +260,10 @@ models.py database.py config.py schemas.py index.html
 static/          local Tailwind + fonts + dashboard assets
 docker/          Caddyfile, pinned requirements, model warmup
 docker-compose*  base, GPU, homelab, direct-LAN overlays
-docs/            end-to-end guide, deployment guides, archive, assets
+docs/            end-to-end guide, deployment guides, model evaluation, archive, assets
 seed/            anonymised demo DB + redacted evidence
-scripts/         seed builder/loader, sample generator, ALPR eval
+scripts/         seed builder/loader, sample generator, YOLO eval/train, ALPR eval
+configs/         dataset YAML templates (traffic fine-tuning, COCO val)
 tests/           API, geometry, plate normalization/consensus
 ```
 
@@ -232,6 +274,8 @@ tests/           API, geometry, plate normalization/consensus
 | Document | Language | Contents |
 |---|---|---|
 | [`docs/end-to-end.md`](docs/end-to-end.md) | English | full walkthrough: data model, YOLO tuning, ALPR, API, dashboard, deploy, security, performance, limits |
+| [`docs/model-evaluation.md`](docs/model-evaluation.md) | English | detection metrics, COCO val2017 sanity check, domain evaluation, ALPR accuracy |
+| [`docs/training.md`](docs/training.md) | English | fine-tuning workflow, dataset layout, class-ID mapping, reproducibility |
 | [`docs/deploy-docker.md`](docs/deploy-docker.md) | Indonesian | single-host Docker + Cloudflare Tunnel |
 | [`docs/deploy-homelab.md`](docs/deploy-homelab.md) | Indonesian | Traefik + shared Cloudflare Tunnel, GPU tuning, backups |
 | [`SECURITY.md`](SECURITY.md) | English | vulnerability reporting + hardening checklist |
@@ -272,6 +316,8 @@ for the manual checks (secret scan, ignore rules, Compose validity, GPU sanity).
 - Upload limit: keep `MAX_UPLOAD_MB` ≤ `CADDY_MAX_BODY` ≤ 100 MB.
 - The public demo data contains no real plates: strings are synthetic, evidence
   pixels are blurred, and raw footage is git-ignored.
+- Documentation screenshots use the same rule: real plate pixels are redacted
+  and any readable OCR value is a synthetic placeholder.
 
 Before exposing a deployment, work through the checklist in
 [`SECURITY.md`](SECURITY.md).
@@ -287,6 +333,10 @@ Before exposing a deployment, work through the checklist in
 - No speed, red-light, or multi-camera logic.
 - Plate patterns are tuned for Indonesian and Czech-style/generic plates.
 - Night, rain, extreme angles, and very distant plates become `unreadable`.
+- The shipped detector is COCO-pretrained, not fine-tuned on this deployment.
+  Domain-specific F1/mAP is not claimed; the published COCO val2017 check is a
+  sanity check, not field accuracy. See
+  [`docs/model-evaluation.md`](docs/model-evaluation.md).
 
 The roadmap (per-user auth, retention, directional crossing, RTSP, PostgreSQL,
 speed estimation, metrics) is in

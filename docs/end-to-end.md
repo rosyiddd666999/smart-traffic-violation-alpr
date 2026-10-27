@@ -109,6 +109,8 @@ multiple workers or multiple hosts; the SQLAlchemy models are portable.
 │   ├── end-to-end.md       this guide
 │   ├── deploy-docker.md    Indonesian deployment guide (single host)
 │   ├── deploy-homelab.md   Indonesian homelab guide (Traefik + Tunnel)
+│   ├── model-evaluation.md metrics, COCO sanity check, domain evaluation
+│   ├── training.md         fine-tuning workflow and class-ID mapping
 │   ├── archive/            original specification, kept for history
 │   └── assets/             sanitised screenshots and compressed videos
 ├── seed/
@@ -118,7 +120,12 @@ multiple workers or multiple hosts; the SQLAlchemy models are portable.
 │   ├── load_seed.py        install the demo dataset into a volume
 │   ├── make_demo_seed.py   rebuild the anonymised dataset from a live DB
 │   ├── make_sample_video.py synthetic CCTV clip generator
+│   ├── eval_yolo.py        detection evaluation (P/R/F1, mAP, plots)
+│   ├── train_yolo.py       fine-tuning wrapper with a reproducibility report
 │   └── eval_alpr.py        generic ALPR accuracy harness
+├── configs/
+│   ├── traffic-data.example.yaml   four-class fine-tuning template
+│   └── coco-val2017.example.yaml   COCO val2017 evaluation template
 └── tests/                  API, geometry, plate normalisation/consensus
 ```
 
@@ -559,6 +566,10 @@ The footer changes with provenance:
 The plate thumbnail is saved separately (`*_plate.jpg`) and enlarged with
 Lanczos if it is narrower than 360 px.
 
+The evidence example in §11 is sanitised: plate pixels are blurred in both the
+photo and the thumbnail, and the OCR headline is a synthetic placeholder. The
+original image is not in the repository.
+
 ### 9.2 Annotated video
 
 `pipeline._annotate_frame()` draws:
@@ -761,10 +772,22 @@ Main areas:
 8. **History** — every job with status and mode chip.
 9. **FAQ** — the system's limits in plain language.
 
-![Evidence detail](assets/screenshots/evidence-detail.png)
+![Dashboard: upload and zone editor](assets/screenshots/dashboard-upload.png)
 
-The screenshot is sanitised: the plate is pixelated and the metadata card shows a
-synthetic value. The original is not in the repository.
+*Upload and zone editor. The polygon is drawn on the source frame, the readiness
+panel checks the file, zone, and classes, and the active-job card shows frame
+progress and the violation count.*
+
+![Dashboard: results and job history](assets/screenshots/dashboard-results.png)
+
+*Results and history. Plate values and thumbnails in this screenshot are
+synthetic demo data; search, job filter, hide-simulated, CSV export, and the
+history table are the real controls.*
+
+![Evidence detail](assets/screenshots/evidence-detail.jpg)
+
+*Evidence JPEG from a real demo run. The plate is pixelated and the OCR headline
+is a synthetic placeholder; the original plate is not in the repository.*
 
 ---
 
@@ -778,7 +801,10 @@ synthetic value. The original is not in the repository.
 | `seed/evidence/` | ~900 KB | 20 redacted JPEGs |
 | `docs/assets/videos/demo-detection-720p.mp4` | 1.3 MB | annotated output, 720p |
 | `docs/assets/videos/sample-traffic.mp4` | 117 KB | synthetic input clip, 720p |
-| `docs/assets/screenshots/evidence-detail.png` | 402 KB | sanitised dashboard screenshot |
+| `docs/assets/screenshots/evidence-detail.jpg` | 77 KB | sanitised evidence example |
+| `docs/assets/screenshots/dashboard-upload.png` | 457 KB | upload + zone editor |
+| `docs/assets/screenshots/dashboard-results.png` | 107 KB | results + history, synthetic plates |
+| `docs/assets/evaluation/coco-val2017/` | ~350 KB | COCO PR/F1 curves, confusion matrix, raw CSV |
 
 ### 12.2 Sample input
 
@@ -978,6 +1004,43 @@ Interpretation:
 - The dashboard is a single page with small static assets; the expensive part is
   polling job status and loading evidence thumbnails.
 
+### 15.1 Detection accuracy (COCO sanity check)
+
+The shipped detector is the official COCO-pretrained `yolo11n.pt`; this project
+does not include a custom fine-tuning run. A reproducible COCO val2017 check
+evaluates the four classes used by the pipeline (`car`, `motorcycle`, `bus`,
+`truck`). It is a sanity check for the checkpoint and the evaluation harness, not
+a measurement of this deployment's cameras.
+
+| COCO id | Class | Instances | P | R | F1 | AP50 | AP50-95 |
+|---:|---|---:|---:|---:|---:|---:|---:|
+| 2 | car | 1,918 | 0.6914 | 0.5193 | 0.5931 | 0.5822 | 0.3719 |
+| 3 | motorcycle | 367 | 0.7817 | 0.5831 | 0.6680 | 0.6738 | 0.4415 |
+| 5 | bus | 283 | 0.8051 | 0.7032 | 0.7507 | 0.7720 | 0.6479 |
+| 7 | truck | 414 | 0.6129 | 0.4082 | 0.4900 | 0.4764 | 0.3205 |
+| — | **macro** | 2,982 | 0.7228 | 0.5534 | 0.6255 | 0.6261 | 0.4455 |
+
+5,000 validation images; 4,952 of them carry at least one annotation. P/R/F1 are
+per-class best-F1 values at each class's own threshold; AP is
+threshold-independent. The macro row averages the four classes, so
+`mAP50 = 0.6261`.
+
+Truck is the weakest class, and car recall is only 0.52 at its best-F1 point:
+expect missed vehicles and car/truck confusion in crowded frames. The app's
+default `CONF_THRESHOLD=0.35` is above those best-F1 points, so live recall is
+lower and precision higher; tune the threshold per scene.
+
+See [`model-evaluation.md`](model-evaluation.md) for the command, weights SHA-256,
+PR/F1 curves, confusion matrix, and the distinction between COCO, domain, and
+ALPR metrics.
+
+### 15.2 Domain accuracy is not measured
+
+There is no labelled traffic validation set in the repository, so no
+domain-specific F1/mAP is claimed. To measure it, label frames from your own
+clips and run `scripts/eval_yolo.py`; [`training.md`](training.md) covers the
+dataset layout and the class-ID mapping.
+
 ---
 
 ## 16. Tests and verification
@@ -1051,6 +1114,10 @@ docker compose exec app python -c \
   them.
 - **Model accuracy depends on the scene.** Night, rain, extreme angles, dirty
   plates, and tiny distant vehicles will produce `unreadable` rows.
+- **No domain-specific detection benchmark.** The shipped weights are
+  COCO-pretrained. The published COCO val2017 check is a sanity check, not field
+  accuracy; a labelled traffic validation set is still needed. See
+  [`model-evaluation.md`](model-evaluation.md).
 
 ### Roadmap
 

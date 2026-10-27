@@ -1,0 +1,6 @@
+predicted\true,car,motorcycle,bus,truck,background
+car,998,3,4,85,389
+motorcycle,2,218,0,0,59
+bus,2,0,193,14,42
+truck,31,0,10,136,106
+background,885,146,76,179,0

@@ -35,11 +35,20 @@ result_videos/
 # checked clips under docs/assets/videos/ are published.
 samples/
 backups/
+repo-git/
 *.db
 *.db-wal
 *.db-shm
 # The anonymised public demo database is intentionally versioned.
 !seed/demo.db
+
+# ---------------------------------------------------------------------------
+# Local datasets and training/evaluation runs
+# Never commit raw footage, labelled plates, or generated run directories.
+# ---------------------------------------------------------------------------
+datasets/
+runs/
+coco/
 
 # ---------------------------------------------------------------------------
 # Logs, archives, OS noise
