@@ -1,0 +1,30 @@
+# Konteks build: hanya kode + aset yang dibutuhkan image.
+.venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.git/
+.gitignore
+
+# Jangan pernah membawa rahasia ke image.
+.env
+.env.*
+!.env.docker.example
+
+# Data pengguna & contoh video tidak ikut image (dimigrasikan ke volume /data).
+storage/
+samples/
+seed/
+*.db
+*.db-wal
+*.db-shm
+
+# Dokumentasi & artefak pengembangan.
+docs/
+tests/
+traffic_violation_ai_project_readme.md
+docker-compose*.yml
+
+# Cache model lokal (model diunduh ulang saat build di dalam image).
+.cache/

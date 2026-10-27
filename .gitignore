@@ -1,0 +1,58 @@
+# ---------------------------------------------------------------------------
+# Secrets and local configuration
+# ---------------------------------------------------------------------------
+.env
+.env.local
+.env.*.local
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.coverage
+htmlcov/
+
+# ---------------------------------------------------------------------------
+# Model weights (downloaded automatically at build/runtime)
+# ---------------------------------------------------------------------------
+*.pt
+*.onnx
+*.pth
+
+# ---------------------------------------------------------------------------
+# Runtime data: SQLite, uploads, evidence, rendered videos
+# The public demo data lives in seed/ instead (see scripts/load_seed.py).
+# ---------------------------------------------------------------------------
+storage/
+result_videos/
+# Raw sample footage may contain real licence plates. Only the compressed,
+# checked clips under docs/assets/videos/ are published.
+samples/
+backups/
+*.db
+*.db-wal
+*.db-shm
+# The anonymised public demo database is intentionally versioned.
+!seed/demo.db
+
+# ---------------------------------------------------------------------------
+# Logs, archives, OS noise
+# ---------------------------------------------------------------------------
+*.log
+*.tar.gz
+*.zip
+.DS_Store
+Thumbs.db
+node_modules/
+
+# ---------------------------------------------------------------------------
+# Tooling caches
+# ---------------------------------------------------------------------------
+.cache/
+.ultralytics/

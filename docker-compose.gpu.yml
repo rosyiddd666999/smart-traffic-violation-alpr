@@ -1,0 +1,28 @@
+# Overlay GPU NVIDIA.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+#
+# Prasyarat di server:
+#   - driver NVIDIA + nvidia-container-toolkit terpasang
+#   - uji: docker run --rm --gpus all nvidia/cuda:12.8.1-base-ubuntu24.04 nvidia-smi
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.gpu
+      args:
+        CUDA_IMAGE: ${CUDA_IMAGE:-nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04}
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu126}
+    image: traffic-alpr:gpu
+    environment:
+      # Nilai bisa dioverride dari .env. Untuk hybrid (Pascal + onnxruntime
+      # modern): DEVICE=0 dan OCR_GPU=false.
+      DEVICE: "${DEVICE:-0}"
+      OCR_GPU: "${OCR_GPU:-true}"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

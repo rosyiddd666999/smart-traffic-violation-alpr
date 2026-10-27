@@ -1,0 +1,56 @@
+# Caddy di belakang Cloudflare Tunnel.
+#
+# - TLS ditangani edge Cloudflare; Caddy hanya HTTP :80 di jaringan internal.
+# - Tugas Caddy: basic auth, batas body 100MB, header keamanan, cache privat.
+# - Variabel BASIC_AUTH_USER / BASIC_AUTH_HASH diambil dari .env (env_file).
+
+{
+	auto_https off
+	admin off
+}
+
+:80 {
+	encode zstd gzip
+
+	# Cloudflare Free menolak body >100MB. Aplikasi sendiri membatasi 95MB;
+	# Caddy memberi batas keras 100MB agar permintaan raksasa tidak masuk.
+	# Bisa diubah lewat CADDY_MAX_BODY di .env (mis. 50MB untuk uplink lambat).
+	request_body {
+		max_size {$CADDY_MAX_BODY:100MB}
+	}
+
+	basic_auth {
+		{$BASIC_AUTH_USER:operator} {$BASIC_AUTH_HASH}
+	}
+
+	# Aplikasi ini menampilkan data pelanggaran: jangan pernah disimpan di
+	# cache browser/proxy (juga mencegah cache Cloudflare menyajikan aset
+	# tanpa melewati basic auth).
+	header {
+		Cache-Control "private, no-store"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "geolocation=(), microphone=(), camera=()"
+		Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self'; connect-src 'self'; form-action 'self'"
+		-Server
+	}
+
+	reverse_proxy app:8000 {
+		transport http {
+			dial_timeout 10s
+		}
+	}
+
+	handle_errors {
+		@payload_too_large expression {http.error.status_code} == 413
+		respond @payload_too_large "413 File terlalu besar. Batas upload 95 MB (Cloudflare Free: 100 MB)." 413
+		respond "Kesalahan server: {http.error.status_code}" {http.error.status_code}
+	}
+
+	log {
+		output stdout
+		format console
+		level INFO
+	}
+}

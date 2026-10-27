@@ -1,0 +1,31 @@
+# Dependency runtime produksi (dipin ke versi yang sudah terbukti di mesin dev).
+#
+# Catatan penting:
+# - torch/torchvision TIDAK ada di sini: dipasang lebih dulu di Dockerfile
+#   memakai index PyTorch (CPU atau CUDA) agar tidak menarik wheel yang salah.
+# - onnxruntime juga dipasang terpisah di Dockerfile (CPU: onnxruntime,
+#   GPU: onnxruntime-gpu) supaya kedua runtime tidak saling menimpa.
+# - EasyOCR sengaja tidak ikut: engine produksi adalah fast-alpr (ONNX).
+#   Bila butuh fallback, build dengan --build-arg INSTALL_EASYOCR=1.
+
+fastapi==0.162.0
+uvicorn[standard]==0.54.0
+SQLAlchemy==2.1.6
+pydantic==2.14.1
+python-multipart==0.0.32
+python-dotenv==1.2.4
+
+numpy==2.5.4
+opencv-python==5.0.0.93
+opencv-python-headless==5.0.0.93
+pillow==13.0.0
+supervision==0.31.2
+ultralytics==8.4.189
+# ByteTrack/BoT-SORT di pipeline memakai model.track(), yang butuh solver
+# penugasan linear. Tanpa lap, job gagal "No module named 'lap'" saat runtime.
+lap==0.5.13
+
+imageio-ffmpeg==0.6.0
+
+# ALPR: detektor plat + OCR plat (ONNX). Runtime-nya dipasang di Dockerfile.
+fast-alpr==0.4.0

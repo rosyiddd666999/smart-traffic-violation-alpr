@@ -1,0 +1,109 @@
+# syntax=docker/dockerfile:1.7
+#
+# Image GPU NVIDIA: CUDA 12.8 + cuDNN 9 (base resmi NVIDIA) + PyTorch CUDA.
+# Dipakai lewat: docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+#
+# Kenapa base NVIDIA, bukan python:slim?
+# - onnxruntime-gpu TIDAK membawa CUDA/cuDNN sendiri; ia butuh CUDA 12.8+
+#   dan cuDNN 9 tersedia di sistem.
+# - Base cudnn-runtime sudah menyediakannya, jadi ALPR benar-benar memakai
+#   CUDAExecutionProvider (bukan diam-diam jatuh ke CPU).
+#
+# Build arg yang bisa disesuaikan (lihat docs/deploy-docker.md):
+#   CUDA_IMAGE      default nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04
+#   TORCH_INDEX_URL default https://download.pytorch.org/whl/cu126
+#                   (torch 2.14.1 tersedia di cu126; cu128 berhenti di 2.11.0)
+#   TORCH_VERSION / TORCHVISION_VERSION / ONNXRUNTIME_GPU_VERSION
+
+ARG CUDA_IMAGE=nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04
+FROM ${CUDA_IMAGE}
+
+ARG TORCH_VERSION=2.14.1
+ARG TORCHVISION_VERSION=0.29.1
+ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cu126
+ARG ONNXRUNTIME_GPU_VERSION=1.31.1
+ARG INSTALL_EASYOCR=0
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    DEBIAN_FRONTEND=noninteractive \
+    VIRTUAL_ENV=/opt/venv \
+    PATH=/opt/venv/bin:$PATH \
+    NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        python3.12 \
+        python3.12-venv \
+        libgl1 \
+        libglib2.0-0 \
+        libgomp1 \
+        libsm6 \
+        libxext6 \
+        libxrender1 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python3.12 -m venv "$VIRTUAL_ENV" \
+    && pip install --upgrade pip setuptools wheel
+
+# 1) PyTorch dengan CUDA. Wheel torch membawa runtime CUDA-nya sendiri
+#    (nvidia-*-cu12), sehingga tidak perlu toolkit tambahan di base.
+RUN pip install --index-url "${TORCH_INDEX_URL}" \
+        "torch==${TORCH_VERSION}" \
+        "torchvision==${TORCHVISION_VERSION}"
+
+# 2) Dependency aplikasi (tanpa torch/onnxruntime).
+COPY docker/requirements.txt /tmp/requirements.txt
+RUN pip install -r /tmp/requirements.txt
+
+# 3) onnxruntime-gpu: butuh CUDA 12.8+ & cuDNN 9 dari base image.
+RUN pip install "onnxruntime-gpu==${ONNXRUNTIME_GPU_VERSION}"
+
+# 4) Opsional: fallback EasyOCR (default tidak dipakai).
+RUN if [ "$INSTALL_EASYOCR" = "1" ]; then \
+        pip install "easyocr==1.7.2"; \
+    fi
+
+# Library CUDA/cuDNN dari wheel pip berfungsi sebagai cadangan bila base
+# image berbeda versi. Direktori sistem (/usr/local/cuda) tetap di depan.
+ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:/opt/venv/lib/python3.12/site-packages/nvidia/cublas/lib:/opt/venv/lib/python3.12/site-packages/nvidia/cudnn/lib:/opt/venv/lib/python3.12/site-packages/nvidia/cufft/lib:/opt/venv/lib/python3.12/site-packages/nvidia/curand/lib:/opt/venv/lib/python3.12/site-packages/nvidia/cusolver/lib:/opt/venv/lib/python3.12/site-packages/nvidia/cusparse/lib:/opt/venv/lib/python3.12/site-packages/nvidia/cuda_runtime/lib:/opt/venv/lib/python3.12/site-packages/nvidia/cuda_nvrtc/lib:/opt/venv/lib/python3.12/site-packages/nvidia/nvjitlink/lib
+
+RUN useradd --uid 10001 --create-home --home-dir /home/appuser \
+        --shell /usr/sbin/nologin appuser \
+    && mkdir -p /app /data \
+    && chown appuser:appuser /data
+
+WORKDIR /app
+COPY --chown=appuser:appuser . .
+
+ENV HOME=/home/appuser \
+    XDG_CACHE_HOME=/home/appuser/.cache \
+    YOLO_CONFIG_DIR=/home/appuser/.config/Ultralytics \
+    MPLCONFIGDIR=/home/appuser/.cache/matplotlib \
+    STORAGE_DIR=/data \
+    DATABASE_URL=sqlite:////data/violations.db \
+    DEVICE=0 \
+    OCR_GPU=true
+
+USER appuser
+
+# Unduh bobot YOLO + model ONNX (build tidak butuh GPU; ORT otomatis CPU
+# saat build lalu memakai CUDA saat container dijalankan).
+RUN python docker/warmup_models.py
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"
+
+# WAJIB satu worker: worker pipeline in-process + SQLite.
+CMD ["uvicorn", "api:app", \
+     "--host", "0.0.0.0", \
+     "--port", "8000", \
+     "--workers", "1", \
+     "--proxy-headers", \
+     "--forwarded-allow-ips", "*"]

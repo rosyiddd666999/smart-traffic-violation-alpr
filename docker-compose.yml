@@ -1,0 +1,88 @@
+# Stack produksi: Cloudflare Tunnel (host) -> Caddy -> FastAPI/ALPR.
+#
+#   docker compose up -d --build
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+#
+# Caddy sengaja hanya listen di 127.0.0.1:${APP_PORT} agar cloudflared di host
+# bisa menjangkaunya tanpa membuka port ke internet.
+name: traffic-alpr
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: traffic-alpr:latest
+    restart: unless-stopped
+    # init: reaping proses ffmpeg anak agar tidak menumpuk sebagai zombie.
+    init: true
+    env_file:
+      - .env
+    environment:
+      # Nilai ini dipaksa di sini agar tidak bergantung isi .env.
+      STORAGE_DIR: /data
+      DATABASE_URL: sqlite:////data/violations.db
+      MOCK_PIPELINE: "0"
+      MOCK_OCR: "0"
+      # Image CPU -> paksa CPU. Overlay GPU menimpa ini dengan DEVICE=0.
+      DEVICE: cpu
+      OCR_GPU: "false"
+    expose:
+      - "8000"
+    volumes:
+      - app_data:/data
+    shm_size: "512mb"
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"
+      interval: 30s
+      timeout: 10s
+      start_period: 40s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - internal
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      # Hanya loopback: cloudflared di host menghubungi http://localhost:8011.
+      - "${APP_BIND:-127.0.0.1}:${APP_PORT:-8011}:80"
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      app:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - internal
+
+volumes:
+  app_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  internal:
+    driver: bridge

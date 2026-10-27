@@ -1,0 +1,27 @@
+# Overlay integrasi homelab: cloudflare-tunnel -> Traefik -> Caddy -> app.
+#
+#   docker compose \
+#     -f docker-compose.yml \
+#     -f docker-compose.gpu.yml \
+#     -f docker-compose.homelab.yml \
+#     up -d
+#
+# Caddy tetap menjadi lapisan basic auth/body limit/CSP. Traefik hanya
+# meneruskan request dari tunnel homelab ke Caddy lewat homelab-network.
+services:
+  caddy:
+    networks: !override
+      - internal
+      - homelab
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: "homelab-network"
+      traefik.http.routers.traffic-alpr.rule: "Host(`${PUBLIC_HOSTNAME:?set PUBLIC_HOSTNAME in .env}`)"
+      traefik.http.routers.traffic-alpr.entrypoints: "web"
+      traefik.http.routers.traffic-alpr.service: "traffic-alpr"
+      traefik.http.services.traffic-alpr.loadbalancer.server.port: "80"
+
+networks:
+  homelab:
+    external: true
+    name: homelab-network

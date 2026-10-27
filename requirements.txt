@@ -1,0 +1,21 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+sqlalchemy>=2.0.30
+pydantic>=2.8.0
+python-multipart>=0.0.9
+python-dotenv>=1.0.1
+
+numpy>=1.26.0
+opencv-python>=4.10.0
+supervision>=0.24.0
+ultralytics>=8.3.0
+# Wajib untuk model.track() (ByteTrack/BoT-SORT) di pipeline.
+lap>=0.5.13
+# ALPR utama: detektor plat + OCR plat (ONNX, berjalan lokal di CPU).
+fast-alpr[onnx]>=0.4.0
+# Fallback opsional (OCR_ENGINE=easyocr).
+easyocr>=1.7.0
+imageio-ffmpeg>=0.5.1
+
+pytest>=8.0.0
+httpx>=0.27.0

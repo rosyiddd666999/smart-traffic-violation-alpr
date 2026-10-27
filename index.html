@@ -1,0 +1,1960 @@
+<!DOCTYPE html>
+<html lang="id" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Dashboard pemantauan pelanggaran lalu lintas dan pembacaan plat nomor (ALPR) dari video CCTV." />
+  <title>Smart Traffic Violation Monitor</title>
+  <link rel="preload" href="/static/assets/fonts/inter-latin-var.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="/static/assets/tailwind.css" />
+  <style>
+    html { color-scheme: dark; }
+    body {
+      background-image:
+        radial-gradient(60rem 40rem at 15% -10%, rgba(79, 70, 229, 0.16), transparent 60%),
+        radial-gradient(50rem 30rem at 90% 0%, rgba(14, 165, 233, 0.10), transparent 55%);
+      background-repeat: no-repeat;
+    }
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: #020617; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 9999px; }
+    ::-webkit-scrollbar-thumb:hover { background: #475569; }
+    #previewVideo { position: fixed; left: -9999px; top: 0; width: 1px; height: 1px; opacity: 0; }
+    #zoneCanvas { cursor: crosshair; touch-action: none; }
+    :focus-visible { outline: 2px solid #818cf8; outline-offset: 2px; }
+    .skeleton {
+      background: linear-gradient(90deg, #0f172a 25%, #1e293b 50%, #0f172a 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.4s ease-in-out infinite;
+    }
+    @keyframes shimmer {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+    #canvasFrame:fullscreen {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #020617;
+      padding: 1rem;
+      border: 0;
+      border-radius: 0;
+    }
+    #canvasFrame:fullscreen canvas {
+      width: auto;
+      height: auto;
+      max-width: 100%;
+      max-height: 100%;
+    }
+    #canvasFrame:fullscreen .canvas-badge { display: none; }
+    details > summary { list-style: none; cursor: pointer; }
+    details > summary::-webkit-details-marker { display: none; }
+    details[open] > summary .chevron { transform: rotate(180deg); }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+      }
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen antialiased font-sans">
+  <a href="#workspace" class="sr-only focus:not-sr-only focus:absolute focus:z-[60] focus:left-4 focus:top-4 focus:rounded-lg focus:bg-indigo-600 focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-white">
+    Lewati ke area kerja
+  </a>
+
+  <!-- Header -->
+  <header class="sticky top-0 z-40 border-b border-slate-800/80 bg-slate-950/85 backdrop-blur">
+    <div class="max-w-7xl mx-auto px-4 md:px-6 py-3 flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-3 min-w-0">
+        <div class="w-11 h-11 shrink-0 rounded-2xl bg-red-500/10 border border-red-500/30 grid place-items-center">
+          <svg class="w-6 h-6 text-red-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v3m0 12v3M5.6 5.6l2.1 2.1m8.6 8.6 2.1 2.1M3 12h3m12 0h3M5.6 18.4l2.1-2.1m8.6-8.6 2.1-2.1" />
+            <circle cx="12" cy="12" r="3.2" />
+          </svg>
+        </div>
+        <div class="min-w-0">
+          <h1 class="text-lg md:text-xl font-bold tracking-tight leading-tight truncate">Smart Traffic Violation Monitor</h1>
+          <p class="text-[11px] md:text-xs text-slate-400 truncate">YOLO11 &middot; ByteTrack &middot; PolygonZone &middot; ALPR</p>
+        </div>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <span id="modeBadge" class="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold rounded-full border border-slate-700 bg-slate-900 text-slate-400">
+          <span class="w-1.5 h-1.5 rounded-full bg-slate-500"></span>MODE ...
+        </span>
+        <span id="healthBadge" class="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium rounded-full border border-slate-700 bg-slate-900 text-slate-400">
+          <span class="w-1.5 h-1.5 rounded-full bg-slate-500"></span>Memeriksa API...
+        </span>
+        <button id="helpBtn" type="button" class="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 px-3 py-2 text-xs font-semibold transition" aria-label="Buka bantuan dan pertanyaan umum">
+          <span aria-hidden="true">?</span><span class="hidden sm:inline">Bantuan</span>
+        </button>
+        <button id="refreshBtn" type="button" class="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 px-3 py-2 rounded-lg text-xs font-semibold transition" aria-label="Muat ulang data">
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/></svg>
+          <span class="hidden sm:inline">Refresh Data</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <div class="max-w-7xl mx-auto p-4 md:p-6 space-y-6">
+    <div id="mockBanner" class="hidden rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+      <span class="font-semibold">Mode demo (MOCK_PIPELINE) aktif.</span>
+      Deteksi memakai kotak sintetis dan OCR deterministik, bukan model YOLO/EasyOCR asli.
+      <span id="deviceInfo" class="text-amber-300/70"></span>
+    </div>
+
+    <main class="space-y-6">
+      <!-- Panduan singkat -->
+      <section aria-labelledby="guideTitle" class="rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-900 via-slate-900 to-slate-950 p-5 md:p-6 shadow-2xl shadow-slate-950/40">
+        <div class="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
+          <div class="max-w-3xl">
+            <p class="text-[11px] uppercase tracking-[0.2em] text-indigo-400 font-semibold">Panduan singkat</p>
+            <h2 id="guideTitle" class="text-xl md:text-2xl font-bold mt-1">Empat langkah mengubah video CCTV menjadi bukti pelanggaran</h2>
+            <p class="text-sm text-slate-400 mt-2 leading-relaxed">
+              Sistem membantu Anda menandai area terlarang, menghitung kendaraan yang memasukinya, dan membaca plat nomornya.
+              Tidak perlu training model — unggah video apa pun, lalu tentukan zonanya.
+            </p>
+          </div>
+          <div class="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3.5 py-3 text-xs text-amber-100 lg:max-w-xs">
+            <p class="font-semibold text-amber-200">Titik yang Anda buat = zona pelanggaran</p>
+            <p class="mt-1 leading-relaxed">AI menghitung kendaraan saat titik bawah kotaknya masuk ke dalam poligon tersebut. Sistem hanya membaca plat nomor, bukan KTP/identitas.</p>
+          </div>
+        </div>
+
+        <ol class="grid sm:grid-cols-2 xl:grid-cols-4 gap-3 mt-5">
+          <li class="relative rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+            <span class="absolute right-3 top-2 text-2xl font-extrabold text-slate-800" aria-hidden="true">01</span>
+            <div class="w-8 h-8 rounded-lg bg-indigo-500/10 border border-indigo-500/30 grid place-items-center text-indigo-300" aria-hidden="true">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0 4 4m-4-4L8 8M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+            </div>
+            <h3 class="text-sm font-semibold mt-2.5">Unggah video CCTV</h3>
+            <p class="text-xs text-slate-400 mt-1 leading-relaxed">MP4, AVI, MKV, atau MOV hingga 500 MB. Video diproses di server ini.</p>
+          </li>
+          <li class="relative rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+            <span class="absolute right-3 top-2 text-2xl font-extrabold text-slate-800" aria-hidden="true">02</span>
+            <div class="w-8 h-8 rounded-lg bg-sky-500/10 border border-sky-500/30 grid place-items-center text-sky-300" aria-hidden="true">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M4 18h16M4 6h16M8 6v12m8-12v12"/></svg>
+            </div>
+            <h3 class="text-sm font-semibold mt-2.5">Pilih frame yang jelas</h3>
+            <p class="text-xs text-slate-400 mt-1 leading-relaxed">Geser slider sampai kendaraan dan plat terlihat jelas. Frame ini menjadi acuan gambar zona.</p>
+          </li>
+          <li class="relative rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
+            <span class="absolute right-3 top-2 text-2xl font-extrabold text-amber-900/60" aria-hidden="true">03</span>
+            <div class="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/30 grid place-items-center text-amber-300" aria-hidden="true">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="m4 20 5-1 9-9a2.1 2.1 0 0 0-3-3l-9 9-2 4Z"/><path stroke-linecap="round" d="m13.5 6.5 4 4"/></svg>
+            </div>
+            <h3 class="text-sm font-semibold mt-2.5">Tandai zona pelanggaran</h3>
+            <p class="text-xs text-slate-400 mt-1 leading-relaxed">Klik minimal 3 titik mengelilingi area terlarang, lalu seret titik untuk merapikan. Titik ini <strong class="text-amber-200">menjadi</strong> batas zona yang diperiksa AI.</p>
+          </li>
+          <li class="relative rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+            <span class="absolute right-3 top-2 text-2xl font-extrabold text-slate-800" aria-hidden="true">04</span>
+            <div class="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/30 grid place-items-center text-emerald-300" aria-hidden="true">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M4 19V5m0 14h16M8 15l3-4 3 2 4-6"/></svg>
+            </div>
+            <h3 class="text-sm font-semibold mt-2.5">Analisis &amp; verifikasi</h3>
+            <p class="text-xs text-slate-400 mt-1 leading-relaxed">AI melacak kendaraan, menghitung pelanggaran, memilih frame bukti, dan membaca plat nomor.</p>
+          </li>
+        </ol>
+      </section>
+
+      <!-- Statistik -->
+      <section aria-label="Ringkasan data" class="grid grid-cols-2 xl:grid-cols-4 gap-3 md:gap-4">
+        <div class="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-[10px] md:text-[11px] text-slate-400 uppercase tracking-wider">Total Pelanggaran</p>
+            <span class="w-2 h-2 rounded-full bg-red-400" aria-hidden="true"></span>
+          </div>
+          <p id="statViolations" class="text-3xl font-extrabold text-red-400 mt-1">0</p>
+          <p id="statViolationsSub" class="text-[11px] text-slate-500 mt-1">dari 0 job</p>
+        </div>
+        <div class="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-[10px] md:text-[11px] text-slate-400 uppercase tracking-wider">Sedang Diproses</p>
+            <span class="w-2 h-2 rounded-full bg-sky-400" aria-hidden="true"></span>
+          </div>
+          <p id="statProcessing" class="text-3xl font-extrabold text-sky-400 mt-1">0</p>
+          <p id="statProcessingSub" class="text-[11px] text-slate-500 mt-1">0 job selesai</p>
+        </div>
+        <div class="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-[10px] md:text-[11px] text-slate-400 uppercase tracking-wider">Job Selesai</p>
+            <span class="w-2 h-2 rounded-full bg-emerald-400" aria-hidden="true"></span>
+          </div>
+          <p id="statCompleted" class="text-3xl font-extrabold text-emerald-400 mt-1">0</p>
+          <p id="statCompletedSub" class="text-[11px] text-slate-500 mt-1">0 gagal · 0 total</p>
+        </div>
+        <div class="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-[10px] md:text-[11px] text-slate-400 uppercase tracking-wider">Plat Terbaca</p>
+            <span class="w-2 h-2 rounded-full bg-indigo-400" aria-hidden="true"></span>
+          </div>
+          <p id="statPlateRate" class="text-3xl font-extrabold text-indigo-300 mt-1">—</p>
+          <p id="statPlateSub" class="text-[11px] text-slate-500 mt-1">Belum ada plat</p>
+          <div class="mt-2 h-1.5 rounded-full bg-slate-800 overflow-hidden">
+            <div id="statPlateBar" class="h-full bg-indigo-400 transition-all duration-500" style="width:0%"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Area kerja -->
+      <section id="workspace" class="grid grid-cols-1 xl:grid-cols-5 gap-6 items-start scroll-mt-24">
+        <div class="xl:col-span-3 rounded-2xl border border-slate-800 bg-slate-900/70 p-4 md:p-5 space-y-4">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p class="text-[11px] uppercase tracking-[0.16em] text-indigo-400 font-semibold">Langkah 1</p>
+              <h2 class="text-base md:text-lg font-semibold">Unggah video &amp; gambar zona pelanggaran</h2>
+              <p class="text-xs text-slate-400 mt-1">Klik pada frame untuk membuat titik. Titik-titik ini membentuk poligon zona yang diperiksa AI.</p>
+            </div>
+            <span id="pointCounter" class="shrink-0 text-xs font-mono px-2.5 py-1 rounded-lg bg-slate-800 text-slate-300">0 titik</span>
+          </div>
+
+          <label id="dropzone" class="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-slate-700 hover:border-indigo-500/70 hover:bg-indigo-500/5 rounded-xl px-4 py-8 text-center cursor-pointer transition">
+            <svg class="w-9 h-9 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5V18a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-1.5M12 3v12m0-12 4 4m-4-4L8 7" />
+            </svg>
+            <span class="text-sm font-medium text-slate-200">Pilih atau seret video CCTV ke sini</span>
+            <span class="text-xs text-slate-500">MP4, AVI, MKV, MOV &middot; maksimal 500 MB &middot; diproses lokal</span>
+            <input id="fileInput" type="file" class="hidden" accept=".mp4,.avi,.mkv,.mov,.m4v,video/*" />
+          </label>
+
+          <div id="videoMeta" class="hidden rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2 text-xs text-slate-400" aria-live="polite"></div>
+
+          <div id="canvasWrap" class="hidden space-y-3">
+            <div id="canvasFrame" class="relative rounded-xl border border-slate-700 bg-slate-950 overflow-hidden">
+              <canvas id="zoneCanvas" class="w-full block" role="img" tabindex="0" aria-label="Frame video untuk menggambar zona pelanggaran. Klik untuk menambah titik, seret titik untuk memindahkan."></canvas>
+              <div class="canvas-badge pointer-events-none absolute left-3 top-3 flex flex-wrap gap-1.5">
+                <span class="rounded-md bg-slate-950/80 border border-slate-700 px-2 py-1 text-[10px] font-medium text-slate-300 backdrop-blur">Bidang gambar = zona pelanggaran</span>
+                <span id="canvasSizeBadge" class="hidden rounded-md bg-slate-950/80 border border-slate-700 px-2 py-1 text-[10px] font-mono text-slate-400 backdrop-blur"></span>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-3">
+              <input id="frameSlider" type="range" min="0" max="1000" value="100" class="flex-1 min-w-[120px] accent-red-500" aria-label="Pilih frame video" />
+              <span id="frameTime" class="text-[11px] font-mono text-slate-400 w-24 text-right shrink-0">0.0s / 0.0s</span>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2">
+              <button id="sampleZoneBtn" type="button" class="text-xs font-semibold px-3 py-2 rounded-lg bg-red-500/10 text-red-300 border border-red-500/30 hover:bg-red-500/20 transition">Isi Zona Demo</button>
+              <button id="undoBtn" type="button" class="text-xs font-semibold px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 transition">Undo Titik</button>
+              <button id="resetZoneBtn" type="button" class="text-xs font-semibold px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 transition">Hapus Zona</button>
+              <button id="fullscreenBtn" type="button" class="text-xs font-semibold px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 transition">Perbesar</button>
+              <span class="ml-auto text-[10px] text-slate-500">Klik dua kali titik untuk menghapus</span>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-2 text-[11px] text-slate-400">
+              <span class="inline-flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-sm border-2 border-amber-400 bg-amber-400/20" aria-hidden="true"></span>Batas zona</span>
+              <span class="inline-flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-full bg-red-500 ring-2 ring-red-200/70" aria-hidden="true"></span>Titik kontrol (bisa digeser)</span>
+              <span class="inline-flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-sm bg-red-500" aria-hidden="true"></span>Melanggar</span>
+              <span class="inline-flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-sm bg-emerald-500" aria-hidden="true"></span>Aman</span>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2">
+              <span id="zoneStatus" class="inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-[11px] font-medium text-amber-300">Belum ada zona</span>
+              <span id="areaInfo" class="rounded-full border border-slate-700 bg-slate-800/60 px-2.5 py-1 text-[11px] text-slate-400">Luas: -</span>
+            </div>
+            <p id="zoneWarning" class="hidden rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200"></p>
+
+            <p class="text-[11px] text-slate-500 leading-relaxed">
+              Klik untuk menambah titik, seret titik untuk menyesuaikan, klik dua kali untuk menghapus. Minimal 3 titik;
+              4–6 titik biasanya cukup mengikuti bentuk area. Koordinat disimpan dalam resolusi asli video sehingga tidak meleset saat tampilan diperkecil.
+            </p>
+
+            <details class="rounded-lg border border-slate-800 bg-slate-950/60">
+              <summary class="flex items-center justify-between gap-2 px-3 py-2 text-xs font-medium text-slate-300">
+                <span>Koordinat zona (mode teknis)</span>
+                <svg class="chevron w-4 h-4 text-slate-500 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6"/></svg>
+              </summary>
+              <div class="px-3 pb-3 space-y-2">
+                <pre id="zoneJson" class="text-[11px] leading-relaxed font-mono max-h-24 overflow-auto rounded-lg border border-slate-800 bg-slate-950 p-2.5 text-emerald-300">[]</pre>
+                <label for="zoneJsonInput" class="sr-only">Input koordinat zona dalam format JSON</label>
+                <textarea id="zoneJsonInput" rows="2" spellcheck="false" placeholder='[[100,400],[900,400],[950,700],[50,700]]' class="w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2 text-[11px] font-mono text-slate-200 placeholder:text-slate-600 focus:border-indigo-500"></textarea>
+                <div class="flex flex-wrap items-center gap-2">
+                  <button id="applyJsonBtn" type="button" class="text-[11px] font-semibold px-2.5 py-1.5 rounded-md bg-indigo-500/10 text-indigo-300 border border-indigo-500/30 hover:bg-indigo-500/20 transition">Terapkan JSON</button>
+                  <span class="text-[10px] text-slate-500">Gunakan saat operator sudah punya koordinat tetap.</span>
+                </div>
+              </div>
+            </details>
+          </div>
+        </div>
+
+        <div class="xl:col-span-2 space-y-4">
+          <div class="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 md:p-5 space-y-4">
+            <div>
+              <p class="text-[11px] uppercase tracking-[0.16em] text-indigo-400 font-semibold">Langkah 2</p>
+              <h2 class="text-base md:text-lg font-semibold">Atur pemeriksaan</h2>
+              <p class="text-xs text-slate-400 mt-1">Pilih kendaraan yang dihitung sebagai pelanggaran bila masuk zona.</p>
+            </div>
+
+            <fieldset class="grid grid-cols-2 gap-2">
+              <legend class="sr-only">Kelas kendaraan yang diperiksa</legend>
+              <label class="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm cursor-pointer hover:border-slate-600">
+                <input type="checkbox" class="class-checkbox accent-red-500" value="2" checked /> Mobil
+              </label>
+              <label class="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm cursor-pointer hover:border-slate-600">
+                <input type="checkbox" class="class-checkbox accent-red-500" value="3" checked /> Motor
+              </label>
+              <label class="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm cursor-pointer hover:border-slate-600">
+                <input type="checkbox" class="class-checkbox accent-red-500" value="5" checked /> Bus
+              </label>
+              <label class="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm cursor-pointer hover:border-slate-600">
+                <input type="checkbox" class="class-checkbox accent-red-500" value="7" checked /> Truk
+              </label>
+            </fieldset>
+
+            <div class="rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-3">
+              <p class="text-xs font-semibold text-indigo-300">Apa yang dibaca AI?</p>
+              <ul class="mt-1.5 space-y-1 text-[11px] text-slate-400">
+                <li><span class="text-emerald-400">✓</span> Jenis kendaraan dan kotak pelacakan (ByteTrack)</li>
+                <li><span class="text-emerald-400">✓</span> Plat nomor kendaraan (ALPR) beserta confidence</li>
+                <li><span class="text-rose-400">✗</span> KTP, wajah, atau identitas kependudukan</li>
+              </ul>
+              <p id="ocrNote" class="hidden mt-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[10px] text-amber-200">
+                OCR simulasi aktif: plat yang tampil adalah data contoh, bukan pembacaan ALPR asli.
+              </p>
+            </div>
+
+            <div class="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+              <p class="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Kesiapan analisis</p>
+              <ul class="mt-2 space-y-1.5 text-xs">
+                <li id="checkFile" class="flex items-center gap-2 text-slate-400">
+                  <span class="check-icon w-4 h-4 shrink-0 grid place-items-center rounded-full text-[10px] font-bold bg-slate-800 text-slate-500 border border-slate-700">•</span>
+                  <span>Video dipilih</span>
+                  <span class="check-hint ml-auto text-[10px] text-slate-500">Belum ada</span>
+                </li>
+                <li id="checkZone" class="flex items-center gap-2 text-slate-400">
+                  <span class="check-icon w-4 h-4 shrink-0 grid place-items-center rounded-full text-[10px] font-bold bg-slate-800 text-slate-500 border border-slate-700">•</span>
+                  <span>Zona minimal 3 titik</span>
+                  <span class="check-hint ml-auto text-[10px] text-slate-500">0/3 titik</span>
+                </li>
+                <li id="checkClass" class="flex items-center gap-2 text-slate-400">
+                  <span class="check-icon w-4 h-4 shrink-0 grid place-items-center rounded-full text-[10px] font-bold bg-slate-800 text-slate-500 border border-slate-700">•</span>
+                  <span>Kelas kendaraan dipilih</span>
+                  <span class="check-hint ml-auto text-[10px] text-slate-500">4 kelas</span>
+                </li>
+              </ul>
+            </div>
+
+            <button id="submitBtn" type="button" disabled class="w-full bg-red-600 hover:bg-red-500 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-white font-semibold text-sm px-4 py-3 rounded-xl transition">
+              Mulai Analisis Video
+            </button>
+            <p id="submitHint" class="text-[11px] text-slate-500">Lengkapi ketiga syarat di atas untuk mengaktifkan analisis.</p>
+            <p class="text-[10px] text-slate-600 leading-relaxed">
+              Video diproses asinkron. Anda dapat menutup halaman ini; job tetap berjalan di server dan hasilnya muncul di riwayat.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Job aktif -->
+      <section id="activeJobCard" class="hidden rounded-2xl border border-slate-800 bg-slate-900/70 p-4 md:p-5 space-y-4 scroll-mt-24" aria-live="polite">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div class="flex flex-wrap items-center gap-2">
+              <h2 class="text-base md:text-lg font-semibold">Job Aktif</h2>
+              <span id="activeJobStatus"></span>
+              <span id="activeJobMode" class="hidden"></span>
+            </div>
+            <p id="activeJobFile" class="text-xs text-slate-400 mt-1">-</p>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <span id="activeJobId" class="font-mono text-[11px] text-indigo-300">-</span>
+            <a id="activeJobVideo" href="#" target="_blank" rel="noopener" class="hidden bg-emerald-600 hover:bg-emerald-500 text-xs font-semibold px-3 py-2 rounded-lg transition">Buka Video</a>
+            <a id="activeJobDownload" href="#" download class="hidden bg-slate-800 hover:bg-slate-700 text-xs font-semibold px-3 py-2 rounded-lg transition">Unduh</a>
+          </div>
+        </div>
+
+        <div>
+          <div class="h-2.5 bg-slate-800 rounded-full overflow-hidden">
+            <div id="activeJobBar" class="h-full bg-sky-500 transition-all duration-500" style="width: 0%"></div>
+          </div>
+          <div class="grid grid-cols-3 gap-3 mt-3 text-center">
+            <div class="rounded-lg bg-slate-950/60 border border-slate-800 py-2">
+              <p class="text-[10px] uppercase tracking-wider text-slate-500">Progress</p>
+              <p id="activeJobPercent" class="text-sm font-bold text-sky-300">0%</p>
+            </div>
+            <div class="rounded-lg bg-slate-950/60 border border-slate-800 py-2">
+              <p class="text-[10px] uppercase tracking-wider text-slate-500">Frame</p>
+              <p id="activeJobFrames" class="text-sm font-bold text-slate-200">0 / ?</p>
+            </div>
+            <div class="rounded-lg bg-slate-950/60 border border-slate-800 py-2">
+              <p class="text-[10px] uppercase tracking-wider text-slate-500">Pelanggaran</p>
+              <p id="activeJobViolations" class="text-sm font-bold text-red-400">0</p>
+            </div>
+          </div>
+        </div>
+
+        <p id="activeJobError" class="hidden text-xs rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-rose-300"></p>
+      </section>
+
+      <!-- Hasil & bukti -->
+      <section id="results" class="rounded-2xl border border-slate-800 bg-slate-900/70 overflow-hidden scroll-mt-24" aria-labelledby="resultsTitle">
+        <div class="flex flex-wrap items-start justify-between gap-3 px-4 md:px-5 py-4 border-b border-slate-800">
+          <div>
+            <h2 id="resultsTitle" class="text-base md:text-lg font-semibold">Hasil &amp; bukti pelanggaran</h2>
+            <p class="text-xs text-slate-500 mt-0.5">Ringkasan kendaraan, keterbacaan plat, dan bukti visual yang bisa diverifikasi.</p>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <span id="violationsCount" class="text-[11px] text-slate-500">Memuat data...</span>
+            <button id="exportCsvBtn" type="button" class="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/20 transition">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3v12m0 0 4-4m-4 4-4-4M4 19h16"/></svg>
+              Ekspor CSV
+            </button>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-2 md:gap-3 px-4 md:px-5 py-4 border-b border-slate-800">
+          <div class="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+            <p class="text-[10px] uppercase tracking-wider text-slate-500">Data terfilter</p>
+            <p id="resultTotal" class="text-2xl font-bold text-slate-100 mt-0.5">0</p>
+          </div>
+          <div class="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+            <p class="text-[10px] uppercase tracking-wider text-slate-500">Plat terbaca</p>
+            <p id="resultReadable" class="text-2xl font-bold text-emerald-400 mt-0.5">0</p>
+          </div>
+          <div class="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+            <p class="text-[10px] uppercase tracking-wider text-slate-500">Tidak terbaca</p>
+            <p id="resultUnreadable" class="text-2xl font-bold text-amber-400 mt-0.5">0</p>
+          </div>
+          <div class="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+            <p class="text-[10px] uppercase tracking-wider text-slate-500">Per jenis kendaraan</p>
+            <div id="resultVehicleChips" class="mt-1.5 flex flex-wrap gap-1">
+              <span class="text-xs text-slate-500">Belum ada data</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex flex-col lg:flex-row gap-2 px-4 md:px-5 py-3 border-b border-slate-800 bg-slate-950/30">
+          <div class="relative flex-1 min-w-[180px]">
+            <label for="searchPlate" class="sr-only">Cari plat nomor, jenis kendaraan, atau job</label>
+            <svg class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path stroke-linecap="round" d="m20 20-3.5-3.5"/></svg>
+            <input id="searchPlate" type="search" placeholder="Cari plat, kendaraan, atau job..." class="w-full rounded-lg border border-slate-700 bg-slate-950 pl-9 pr-3 py-2 text-xs text-slate-200 placeholder:text-slate-600 focus:border-indigo-500" />
+          </div>
+          <label for="jobFilter" class="sr-only">Filter berdasarkan job</label>
+          <select id="jobFilter" class="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-200 focus:border-indigo-500">
+            <option value="">Semua job</option>
+          </select>
+          <label class="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-300 cursor-pointer select-none">
+            <input id="hideSimulated" type="checkbox" checked class="accent-indigo-500" />
+            Sembunyikan simulasi
+          </label>
+          <label for="sortOrder" class="sr-only">Urutkan data</label>
+          <select id="sortOrder" class="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-200 focus:border-indigo-500">
+            <option value="newest">Terbaru dulu</option>
+            <option value="oldest">Terlama dulu</option>
+            <option value="plate">Urut plat A–Z</option>
+          </select>
+          <label for="resultLimit" class="sr-only">Jumlah data yang ditampilkan</label>
+          <select id="resultLimit" class="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-200 focus:border-indigo-500">
+            <option value="10">10 data</option>
+            <option value="25" selected>25 data</option>
+            <option value="50">50 data</option>
+            <option value="100">100 data</option>
+            <option value="0">Semua</option>
+          </select>
+        </div>
+
+        <div id="violationsCards" class="md:hidden divide-y divide-slate-800/80">
+          <p class="p-6 text-center text-sm text-slate-500">Memuat data...</p>
+        </div>
+
+        <div class="hidden md:block overflow-x-auto">
+          <table class="w-full text-left text-sm">
+            <thead class="bg-slate-800/50 text-slate-400 uppercase text-[10px] tracking-wider">
+              <tr>
+                <th class="p-3">Bukti</th>
+                <th class="p-3">Plat Nomor</th>
+                <th class="p-3">Kendaraan</th>
+                <th class="p-3">Waktu</th>
+                <th class="p-3">Job</th>
+                <th class="p-3">Confidence</th>
+                <th class="p-3 text-right">Aksi</th>
+              </tr>
+            </thead>
+            <tbody id="violationsBody" class="divide-y divide-slate-800/80">
+              <tr><td colspan="7" class="p-6 text-center text-sm text-slate-500">Memuat data...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Riwayat job -->
+      <section class="rounded-2xl border border-slate-800 bg-slate-900/70 overflow-hidden" aria-labelledby="jobsTitle">
+        <div class="flex flex-wrap items-center justify-between gap-3 px-4 md:px-5 py-4 border-b border-slate-800">
+          <div>
+            <h2 id="jobsTitle" class="text-base md:text-lg font-semibold">Riwayat job</h2>
+            <p class="text-xs text-slate-500 mt-0.5">Semua video yang pernah dianalisis di server ini.</p>
+          </div>
+          <span id="jobCount" class="text-[11px] text-slate-500">0 job</span>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-sm">
+            <thead class="bg-slate-800/50 text-slate-400 uppercase text-[10px] tracking-wider">
+              <tr>
+                <th class="p-3">Job ID</th>
+                <th class="p-3 hidden sm:table-cell">File</th>
+                <th class="p-3">Status</th>
+                <th class="p-3">Progress</th>
+                <th class="p-3 text-center">Pelanggaran</th>
+                <th class="p-3 hidden lg:table-cell">Dibuat</th>
+                <th class="p-3 text-right">Aksi</th>
+              </tr>
+            </thead>
+            <tbody id="jobsBody" class="divide-y divide-slate-800/80">
+              <tr><td colspan="7" class="p-6 text-center text-sm text-slate-500">Memuat data...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- FAQ -->
+      <section id="faq" class="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 md:p-5 scroll-mt-24" aria-labelledby="faqTitle">
+        <div class="flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <h2 id="faqTitle" class="text-base md:text-lg font-semibold">Pertanyaan umum &amp; batasan sistem</h2>
+            <p class="text-xs text-slate-500 mt-1">Baca ini agar hasil analisis tidak disalahartikan.</p>
+          </div>
+          <span class="text-[10px] uppercase tracking-wider text-slate-500">ALPR, bukan data kependudukan</span>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-2.5 mt-4">
+          <details class="rounded-xl border border-slate-800 bg-slate-950/60 px-3.5 py-3">
+            <summary class="flex items-center justify-between gap-2 text-sm font-medium text-slate-200">
+              Apakah sistem membaca KTP atau identitas?
+              <svg class="chevron w-4 h-4 shrink-0 text-slate-500 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6"/></svg>
+            </summary>
+            <p class="mt-2 text-xs text-slate-400 leading-relaxed">Tidak. Sistem hanya membaca <strong class="text-slate-200">plat nomor kendaraan</strong> dari citra video. Tidak ada pembacaan KTP, wajah, sidik jari, atau data kependudukan. Jangan gunakan hasil ini sebagai identifikasi orang.</p>
+          </details>
+
+          <details class="rounded-xl border border-slate-800 bg-slate-950/60 px-3.5 py-3">
+            <summary class="flex items-center justify-between gap-2 text-sm font-medium text-slate-200">
+              Mengapa plat muncul sebagai TIDAK TERBACA?
+              <svg class="chevron w-4 h-4 shrink-0 text-slate-500 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6"/></svg>
+            </summary>
+            <p class="mt-2 text-xs text-slate-400 leading-relaxed">Biasanya karena plat terlalu kecil, blur, miring, gelap, tertutup, atau formatnya bukan format Indonesia. Bukti tetap disimpan; petugas dapat memverifikasi manual. Plat Eropa pada video contoh publik memang sering tidak cocok dengan pola Indonesia.</p>
+          </details>
+
+          <details class="rounded-xl border border-slate-800 bg-slate-950/60 px-3.5 py-3">
+            <summary class="flex items-center justify-between gap-2 text-sm font-medium text-slate-200">
+              Mengapa kendaraan kecil di video 4K terlewat?
+              <svg class="chevron w-4 h-4 shrink-0 text-slate-500 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6"/></svg>
+            </summary>
+            <p class="mt-2 text-xs text-slate-400 leading-relaxed">Resolusi inferensi default 640 px membuat objek jauh mengecil. Naikkan <code class="text-indigo-300">IMGSZ</code> ke 960/1280, atau potong segmen dan perkecil videonya. Semakin besar IMGSZ, semakin lama proses di CPU.</p>
+          </details>
+
+          <details class="rounded-xl border border-slate-800 bg-slate-950/60 px-3.5 py-3">
+            <summary class="flex items-center justify-between gap-2 text-sm font-medium text-slate-200">
+              Apakah video saya dikirim ke internet?
+              <svg class="chevron w-4 h-4 shrink-0 text-slate-500 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6"/></svg>
+            </summary>
+            <p class="mt-2 text-xs text-slate-400 leading-relaxed">Tidak. Video diunggah ke server FastAPI yang Anda jalankan sendiri dan diproses lokal. Dashboard bahkan memuat font dan CSS dari server yang sama (tanpa CDN); isi video tidak dikirim ke layanan pihak ketiga.</p>
+          </details>
+
+          <details class="rounded-xl border border-slate-800 bg-slate-950/60 px-3.5 py-3">
+            <summary class="flex items-center justify-between gap-2 text-sm font-medium text-slate-200">
+              Apakah hasil AI bisa langsung dijadikan tilang?
+              <svg class="chevron w-4 h-4 shrink-0 text-slate-500 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6"/></svg>
+            </summary>
+            <p class="mt-2 text-xs text-slate-400 leading-relaxed">Tidak. Ini alat bantu. Setiap kandidat pelanggaran wajib diverifikasi petugas melalui bukti gambar/video, terutama bila plat tidak terbaca atau confidence rendah. Kesalahan deteksi tetap mungkin terjadi.</p>
+          </details>
+
+          <details class="rounded-xl border border-slate-800 bg-slate-950/60 px-3.5 py-3">
+            <summary class="flex items-center justify-between gap-2 text-sm font-medium text-slate-200">
+              Video hasil tidak bisa diputar di browser?
+              <svg class="chevron w-4 h-4 shrink-0 text-slate-500 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6"/></svg>
+            </summary>
+            <p class="mt-2 text-xs text-slate-400 leading-relaxed">Browser tidak mendukung semua codec. Output server memakai H.264 agar kompatibel. Bila pratinjau frame video sumber gagal, zona tetap bisa digambar dengan kanvas cadangan; pastikan koordinat sesuai resolusi video.</p>
+          </details>
+        </div>
+      </section>
+
+    </main>
+
+    <footer class="border-t border-slate-800 pt-5 pb-4 space-y-3">
+      <div class="rounded-xl border border-slate-800 bg-slate-900/60 p-4 text-xs text-slate-400">
+        <p class="font-semibold text-slate-300">Batasan &amp; tanggung jawab</p>
+        <p class="mt-1 leading-relaxed">
+          Sistem ini hanya membaca <strong class="text-slate-200">plat nomor kendaraan (ALPR)</strong>, bukan KTP, wajah, atau identitas pribadi.
+          Hasil deteksi adalah <strong class="text-slate-200">alat bantu</strong>; keputusan pelanggaran tetap memerlukan verifikasi petugas.
+          Video diproses secara lokal di server ini dan tidak dikirim ke layanan pihak ketiga.
+        </p>
+      </div>
+      <p class="text-center text-[11px] text-slate-600">
+        Smart Traffic Violation &amp; ALPR Surveillance &middot; FastAPI + YOLO11 + ByteTrack + EasyOCR
+      </p>
+    </footer>
+  </div>
+
+  <!-- Modal video hasil -->
+  <div id="videoModal" class="hidden fixed inset-0 z-50 bg-black/85 backdrop-blur-sm p-4 md:p-10" role="dialog" aria-modal="true" aria-labelledby="videoModalTitle">
+    <div class="max-w-5xl mx-auto h-full flex flex-col gap-3">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <h3 id="videoModalTitle" class="text-base font-semibold">Video Hasil Analisis</h3>
+        <div class="flex items-center gap-2">
+          <a id="modalDownload" href="#" download class="text-xs font-semibold px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 transition">Unduh Video</a>
+          <button id="closeModalBtn" type="button" class="text-sm font-semibold px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 transition">Tutup</button>
+        </div>
+      </div>
+      <video id="modalVideo" class="w-full flex-1 min-h-0 rounded-xl bg-black border border-slate-800" controls playsinline></video>
+      <p class="text-[11px] text-slate-400">
+        Kotak <span class="text-red-400 font-semibold">merah</span> = kendaraan melanggar,
+        <span class="text-emerald-400 font-semibold">hijau</span> = aman,
+        garis <span class="text-amber-300 font-semibold">kuning</span> = batas zona yang Anda gambar.
+      </p>
+    </div>
+  </div>
+
+  <!-- Lightbox bukti -->
+  <div id="evidenceLightbox" class="hidden fixed inset-0 z-50 bg-black/90 backdrop-blur-sm p-4 md:p-8" role="dialog" aria-modal="true" aria-labelledby="evidenceTitle">
+    <div class="max-w-6xl mx-auto h-full flex flex-col gap-3">
+      <div class="flex items-center justify-between gap-3">
+        <h3 id="evidenceTitle" class="text-base font-semibold">Bukti Pelanggaran</h3>
+        <div class="flex items-center gap-2">
+          <a id="evidenceDownload" href="#" download class="text-xs font-semibold px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 transition">Unduh Bukti</a>
+          <button id="closeLightboxBtn" type="button" class="text-sm font-semibold px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 transition">Tutup</button>
+        </div>
+      </div>
+      <div class="flex-1 min-h-0 flex flex-col md:flex-row gap-3">
+        <div class="flex-1 min-h-0 rounded-xl border border-slate-800 bg-black grid place-items-center overflow-hidden">
+          <img id="evidenceImage" alt="Bukti pelanggaran" class="max-w-full max-h-full object-contain" />
+        </div>
+        <aside id="platePanel" class="hidden md:w-64 shrink-0 rounded-xl border border-slate-800 bg-slate-900/80 p-3 space-y-2">
+          <p class="text-[10px] uppercase tracking-wider text-slate-500">Crop plat dari detektor</p>
+          <div class="rounded-lg border border-slate-800 bg-black p-1 grid place-items-center min-h-[64px]">
+            <img id="evidencePlateImage" alt="Crop plat kendaraan" class="max-w-full max-h-24 object-contain" />
+          </div>
+          <p id="evidencePlateSource" class="text-[11px] leading-snug"></p>
+          <p id="evidencePlateMeta" class="text-[10px] text-slate-500 break-words"></p>
+        </aside>
+      </div>
+      <div id="evidenceMeta" class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs"></div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" role="status" aria-live="polite" class="hidden fixed bottom-6 right-6 z-[60] max-w-md rounded-xl border px-4 py-3 text-sm shadow-2xl"></div>
+
+  <!-- Video tersembunyi untuk ekstraksi frame -->
+  <video id="previewVideo" muted playsinline preload="auto"></video>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    const state = {
+      file: null,
+      objectUrl: null,
+      points: [],
+      activeJobId: null,
+      pollHandle: null,
+      canvasSized: false,
+      health: null,
+      violations: [],
+      draggingIndex: null,
+      dragPointerId: null,
+    };
+
+    const STATUS_LABEL = {
+      PENDING: "Menunggu",
+      PROCESSING: "Memproses",
+      COMPLETED: "Selesai",
+      FAILED: "Gagal",
+    };
+
+    const STATUS_CLASS = {
+      PENDING: "bg-amber-500/10 text-amber-300 border-amber-500/30",
+      PROCESSING: "bg-sky-500/10 text-sky-300 border-sky-500/30",
+      COMPLETED: "bg-emerald-500/10 text-emerald-300 border-emerald-500/30",
+      FAILED: "bg-rose-500/10 text-rose-300 border-rose-500/30",
+    };
+
+    const VEHICLE_STYLE = {
+      Mobil: "bg-indigo-500/10 text-indigo-300 border-indigo-500/30",
+      Motor: "bg-sky-500/10 text-sky-300 border-sky-500/30",
+      Bus: "bg-amber-500/10 text-amber-300 border-amber-500/30",
+      Truk: "bg-rose-500/10 text-rose-300 border-rose-500/30",
+    };
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      }[char]));
+    }
+
+    function formatDateTime(value) {
+      if (!value) return "-";
+      let text = String(value);
+      if (!/[zZ]|[+-]\d\d:\d\d$/.test(text)) text += "Z";
+      const date = new Date(text);
+      if (Number.isNaN(date.getTime())) return String(value);
+      return date.toLocaleString("id-ID", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    }
+
+    function statusBadge(status) {
+      const label = STATUS_LABEL[status] || status;
+      const classes = STATUS_CLASS[status] || "bg-slate-800 text-slate-300 border-slate-700";
+      return `<span class="inline-flex items-center px-2 py-0.5 rounded-full border text-[11px] font-medium ${classes}">${escapeHtml(label)}</span>`;
+    }
+
+    function jobModeChip(job) {
+      const mode = String(job.mode || "legacy").toLowerCase();
+      const base = "ml-1 inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-semibold align-middle";
+      if (mode === "legacy") {
+        return `<span class="${base} border-slate-600 bg-slate-800 text-slate-300" title="Job lama era OCR simulasi: platnya tidak boleh dipakai sebagai bukti">LEGACY</span>`;
+      }
+      if (mode === "simulated" || job.mock_ocr || job.mock_pipeline) {
+        return `<span class="${base} border-amber-500/30 bg-amber-500/10 text-amber-300" title="Job ini memakai deteksi/OCR simulasi">SIMULASI</span>`;
+      }
+      return `<span class="${base} border-emerald-500/30 bg-emerald-500/10 text-emerald-300" title="Deteksi dan ALPR berjalan pada piksel asli">ASLI</span>`;
+    }
+
+    function modeInfo() {
+      const health = state.health;
+      if (!health) {
+        return { text: "MODE ...", classes: "border-slate-700 bg-slate-900 text-slate-400", dot: "bg-slate-500", title: "Menunggu status server" };
+      }
+      if (health.mock_pipeline) {
+        return {
+          text: "MODE DEMO",
+          classes: "border-amber-500/30 bg-amber-500/10 text-amber-300",
+          dot: "bg-amber-400",
+          title: "Deteksi sintetis aktif (MOCK_PIPELINE=1)",
+        };
+      }
+      if (health.mock_ocr) {
+        return {
+          text: "ASLI · OCR SIM",
+          classes: "border-amber-500/30 bg-amber-500/10 text-amber-300",
+          dot: "bg-amber-400",
+          title: "Deteksi YOLO asli, pembacaan plat memakai OCR simulasi",
+        };
+      }
+      return {
+        text: "MODE ASLI",
+        classes: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
+        dot: "bg-emerald-400",
+        title: `Deteksi YOLO asli + ALPR ${health.ocr_engine || "fast-alpr"} membaca plat langsung dari piksel video`,
+      };
+    }
+
+    function emptyRow(colspan, message) {
+      return `<tr><td colspan="${colspan}" class="p-6 text-center text-sm text-slate-500">${escapeHtml(message)}</td></tr>`;
+    }
+
+    async function request(path, options = {}) {
+      const response = await fetch(path, options);
+      if (!response.ok) {
+        let message = `HTTP ${response.status}`;
+        try {
+          const payload = await response.json();
+          if (typeof payload.detail === "string") {
+            message = payload.detail;
+          } else if (Array.isArray(payload.detail)) {
+            message = payload.detail.map((item) => item.msg || JSON.stringify(item)).join(", ");
+          }
+        } catch (error) {
+          /* respons bukan JSON */
+        }
+        throw new Error(message);
+      }
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) return response;
+      return response.json();
+    }
+
+    let toastTimer = null;
+    function toast(message, type = "info") {
+      const palette = {
+        success: "bg-emerald-950/95 border-emerald-500/40 text-emerald-200",
+        error: "bg-rose-950/95 border-rose-500/40 text-rose-200",
+        info: "bg-slate-900/95 border-slate-600 text-slate-200",
+      };
+      const element = $("toast");
+      element.className = `fixed bottom-6 right-6 z-[60] max-w-md rounded-xl border px-4 py-3 text-sm shadow-2xl ${palette[type] || palette.info}`;
+      element.textContent = message;
+      element.classList.remove("hidden");
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => element.classList.add("hidden"), 5000);
+    }
+
+    /* ----------------------------- Health & statistik ----------------------------- */
+
+    async function loadHealth() {
+      const badge = $("healthBadge");
+      const mode = $("modeBadge");
+      try {
+        const health = await request("/health");
+        state.health = health;
+        const ok = health.status === "ok";
+        badge.className = `inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium rounded-full border ${
+          ok
+            ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+            : "border-amber-500/30 bg-amber-500/10 text-amber-300"
+        }`;
+        badge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full ${ok ? "bg-emerald-400 animate-pulse" : "bg-amber-400"}"></span>${
+          ok ? "API Online" : "API Degraded"
+        }`;
+
+        const info = modeInfo();
+        mode.className = `inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold rounded-full border ${info.classes}`;
+        mode.title = info.title;
+        mode.innerHTML = `<span class="w-1.5 h-1.5 rounded-full ${info.dot}"></span>${escapeHtml(info.text)}`;
+
+        $("mockBanner").classList.toggle("hidden", !health.mock_pipeline);
+        $("deviceInfo").textContent = `Model: ${health.model_weights} @ ${health.device} · imgsz ${health.imgsz_auto ? "adaptif" : health.imgsz} · ALPR ${health.ocr_engine || "-"}.`;
+        $("ocrNote").classList.toggle("hidden", !(health.mock_ocr && !health.mock_pipeline));
+        if ($("activeJobCard").classList.contains("hidden")) renderActiveJobMode();
+      } catch (error) {
+        badge.className = "inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium rounded-full border border-rose-500/30 bg-rose-500/10 text-rose-300";
+        badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-rose-400"></span>API Offline';
+        mode.className = "inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold rounded-full border border-slate-700 bg-slate-900 text-slate-400";
+        mode.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-slate-500"></span>MODE ...';
+      }
+    }
+
+    async function loadStats() {
+      try {
+        const stats = await request("/api/v1/stats");
+        const totalJobs = Number(stats.total_jobs) || 0;
+        const totalViolations = Number(stats.total_violations) || 0;
+        const processing = (Number(stats.processing_jobs) || 0) + (Number(stats.pending_jobs) || 0);
+        const completed = Number(stats.completed_jobs) || 0;
+        const failed = Number(stats.failed_jobs) || 0;
+        const readable = Number(stats.readable_plates) || 0;
+        const unreadable = Number(stats.unreadable_plates) || 0;
+        const simulated = Number(stats.simulated_violations) || 0;
+        const plateTotal = readable + unreadable;
+
+        $("statViolations").textContent = totalViolations;
+        $("statViolationsSub").textContent = simulated
+          ? `dari ${totalJobs} job · ${simulated} simulasi dikecualikan`
+          : `dari ${totalJobs} job`;
+        $("statViolationsSub").title = `${Number(stats.legacy_jobs) || 0} job legacy · ${Number(stats.legacy_violations) || 0} data legacy tidak dihitung`;
+        $("statProcessing").textContent = processing;
+        $("statProcessingSub").textContent = `${completed} job selesai`;
+        $("statCompleted").textContent = completed;
+        $("statCompletedSub").textContent = `${failed} gagal · ${totalJobs} total`;
+
+        const rate = plateTotal ? Math.round((readable / plateTotal) * 100) : 0;
+        $("statPlateRate").textContent = plateTotal ? `${rate}%` : "—";
+        $("statPlateSub").textContent = plateTotal ? `${readable} terbaca · ${unreadable} tidak` : "Belum ada plat";
+        $("statPlateBar").style.width = `${plateTotal ? rate : 0}%`;
+      } catch (error) {
+        console.error("Gagal memuat statistik:", error);
+      }
+    }
+
+    /* --------------------------------- Riwayat job -------------------------------- */
+
+    async function loadJobs() {
+      try {
+        const jobs = await request("/api/v1/jobs?limit=12");
+        $("jobCount").textContent = `${jobs.length} job terbaru`;
+        const body = $("jobsBody");
+        if (!jobs.length) {
+          body.innerHTML = emptyRow(7, "Belum ada job. Unggah video untuk memulai.");
+          return;
+        }
+        body.innerHTML = jobs.map((job) => {
+          const terminal = ["COMPLETED", "FAILED"].includes(job.status);
+          const pct = Math.min(100, Math.max(0, Number(job.progress_percentage) || 0));
+          const actions = [];
+          if (!terminal) {
+            actions.push(`<button type="button" data-action="monitor" data-job-id="${escapeHtml(job.job_id)}" class="text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-sky-500/10 text-sky-300 border border-sky-500/30 hover:bg-sky-500/20 transition">Pantau</button>`);
+          }
+          if (job.status === "COMPLETED") {
+            actions.push(`<button type="button" data-action="result" data-job-id="${escapeHtml(job.job_id)}" class="text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-indigo-500/10 text-indigo-300 border border-indigo-500/30 hover:bg-indigo-500/20 transition">Hasil</button>`);
+          }
+          if (job.output_video_url) {
+            actions.push(`<button type="button" data-action="video" data-url="${escapeHtml(job.output_video_url)}" class="text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/20 transition">Video</button>`);
+          }
+          return `<tr class="hover:bg-slate-800/30 transition">
+            <td class="p-3 font-mono text-[11px] text-indigo-300 whitespace-nowrap">${escapeHtml(job.job_id)}</td>
+            <td class="p-3 hidden sm:table-cell text-xs text-slate-300 max-w-[180px] truncate" title="${escapeHtml(job.original_filename || "")}">${escapeHtml(job.original_filename || "-")}</td>
+            <td class="p-3">${statusBadge(job.status)}${jobModeChip(job)}</td>
+            <td class="p-3 min-w-[130px]">
+              <div class="flex items-center gap-2">
+                <div class="h-1.5 flex-1 bg-slate-800 rounded-full overflow-hidden">
+                  <div class="h-full ${job.status === "FAILED" ? "bg-rose-500" : job.status === "COMPLETED" ? "bg-emerald-500" : "bg-sky-500"}" style="width:${pct}%"></div>
+                </div>
+                <span class="text-[10px] text-slate-400 w-9 text-right">${pct.toFixed(0)}%</span>
+              </div>
+            </td>
+            <td class="p-3 text-center font-semibold ${job.violations_detected ? "text-red-400" : "text-slate-500"}">${job.violations_detected}</td>
+            <td class="p-3 hidden lg:table-cell text-[11px] text-slate-400 whitespace-nowrap">${formatDateTime(job.created_at)}</td>
+            <td class="p-3 text-right whitespace-nowrap">${actions.join(" ") || '<span class="text-xs text-slate-600">-</span>'}</td>
+          </tr>`;
+        }).join("");
+      } catch (error) {
+        console.error("Gagal memuat job:", error);
+      }
+    }
+
+    /* ------------------------------ Log pelanggaran ------------------------------- */
+
+    const PLATE_SOURCE_STYLE = {
+      real: {
+        label: "OCR ASLI",
+        classes: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
+        note: "dibaca dari piksel video",
+      },
+      simulated: {
+        label: "SIMULASI",
+        classes: "border-amber-500/30 bg-amber-500/10 text-amber-300",
+        note: "data uji, bukan bukti",
+      },
+      unreadable: {
+        label: "TIDAK TERBACA",
+        classes: "border-slate-600 bg-slate-800 text-slate-300",
+        note: "perlu verifikasi manual",
+      },
+    };
+
+    function plateSource(violation) {
+      const source = String(violation.plate_source || "").toLowerCase();
+      if (PLATE_SOURCE_STYLE[source]) return source;
+      // Data lama tanpa plate_source: anggap simulasi agar tidak tampak asli.
+      return isUnreadable(violation) ? "unreadable" : "simulated";
+    }
+
+    function plateSourceChip(violation) {
+      const source = plateSource(violation);
+      const style = PLATE_SOURCE_STYLE[source];
+      return `<span class="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-semibold ${style.classes}">${style.label}</span>`;
+    }
+
+    function isUnreadable(violation) {
+      const source = String(violation.plate_source || "").toLowerCase();
+      if (source === "unreadable") return true;
+      if (source === "real" || source === "simulated") {
+        return !violation.license_plate || violation.license_plate === "TIDAK TERBACA";
+      }
+      return !violation.license_plate || violation.license_plate === "TIDAK TERBACA" || !Number(violation.ocr_confidence);
+    }
+
+    function placeholderImage() {
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180"><rect width="100%" height="100%" fill="#0f172a"/><text x="50%" y="50%" fill="#64748b" font-family="sans-serif" font-size="13" text-anchor="middle" dominant-baseline="middle">Bukti tidak tersedia</text></svg>`;
+      return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+    }
+
+    async function loadViolations() {
+      try {
+        const violations = await request("/api/v1/violations?limit=200");
+        state.violations = violations;
+        populateJobFilter(violations);
+        renderViolations();
+      } catch (error) {
+        console.error("Gagal memuat pelanggaran:", error);
+      }
+    }
+
+    function populateJobFilter(violations) {
+      const select = $("jobFilter");
+      const current = select.value;
+      const jobIds = [...new Set(violations.map((item) => item.job_id))];
+      select.innerHTML = '<option value="">Semua job</option>' + jobIds
+        .map((jobId) => `<option value="${escapeHtml(jobId)}">${escapeHtml(jobId)}</option>`)
+        .join("");
+      if (jobIds.includes(current)) select.value = current;
+    }
+
+    function getFilteredViolations() {
+      const query = ($("searchPlate").value || "").trim().toLowerCase();
+      const jobId = $("jobFilter").value;
+      const sort = $("sortOrder").value;
+      let rows = state.violations.slice();
+      if ($("hideSimulated").checked) {
+        rows = rows.filter((item) => plateSource(item) !== "simulated");
+      }
+      if (jobId) rows = rows.filter((item) => item.job_id === jobId);
+      if (query) {
+        rows = rows.filter((item) => {
+          const haystack = `${item.license_plate || ""} ${item.vehicle_type || ""} ${item.job_id || ""} ${item.violation_type || ""}`.toLowerCase();
+          return haystack.includes(query);
+        });
+      }
+      rows.sort((a, b) => {
+        if (sort === "plate") {
+          return String(a.license_plate || "").localeCompare(String(b.license_plate || ""), "id");
+        }
+        const first = Number(a.id) || 0;
+        const second = Number(b.id) || 0;
+        return sort === "oldest" ? first - second : second - first;
+      });
+      return rows;
+    }
+
+    function confidenceText(violation) {
+      if (plateSource(violation) !== "real") return "—";
+      return `${((Number(violation.ocr_confidence) || 0) * 100).toFixed(1)}%`;
+    }
+
+    function evidenceThumb(violation, size = "w-28 h-16") {
+      if (!violation.evidence_image_url) {
+        return '<span class="text-[11px] text-slate-600">Tidak ada</span>';
+      }
+      return `<button type="button" data-action="evidence" data-id="${violation.id}" class="group relative block overflow-hidden rounded-lg border border-slate-700 hover:border-indigo-400 transition" aria-label="Buka bukti pelanggaran ${violation.id}">
+        <img src="${escapeHtml(violation.evidence_image_url)}" loading="lazy" alt="Bukti pelanggaran ${violation.id}" class="${size} object-cover transition group-hover:scale-105" />
+        <span class="absolute inset-0 grid place-items-center bg-slate-950/60 text-[10px] font-semibold text-white opacity-0 group-hover:opacity-100 transition">Perbesar</span>
+      </button>`;
+    }
+
+    function plateCell(violation) {
+      const source = plateSource(violation);
+      const tone = source === "real" ? "text-emerald-300" : source === "simulated" ? "text-sky-300" : "text-amber-400";
+      return `<p class="font-mono text-sm font-semibold ${tone}">${escapeHtml(violation.license_plate || "-")}</p>
+        <p class="mt-1 flex flex-wrap items-center gap-1 text-[10px] text-slate-500">${plateSourceChip(violation)}<span>${PLATE_SOURCE_STYLE[source].note}</span></p>`;
+    }
+
+    function vehicleBadge(vehicleType) {
+      const label = vehicleType || "Lainnya";
+      const classes = VEHICLE_STYLE[label] || "bg-slate-800 text-slate-300 border-slate-700";
+      return `<span class="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${classes}">${escapeHtml(label)}</span>`;
+    }
+
+    function renderViolations() {
+      const filtered = getFilteredViolations();
+      const limit = Number($("resultLimit").value);
+      const rows = limit > 0 ? filtered.slice(0, limit) : filtered;
+      const readable = filtered.filter((item) => plateSource(item) === "real").length;
+      const unreadable = filtered.filter((item) => plateSource(item) === "unreadable").length;
+      const simulated = filtered.filter((item) => plateSource(item) === "simulated").length;
+
+      $("resultTotal").textContent = filtered.length;
+      $("resultReadable").textContent = readable;
+      $("resultUnreadable").textContent = unreadable;
+      $("violationsCount").textContent = `${
+        filtered.length === state.violations.length ? `${filtered.length} data` : `${filtered.length} dari ${state.violations.length} data`
+      }${simulated ? ` · ${simulated} simulasi` : ""} · ${rows.length} ditampilkan`;
+
+      const counts = {};
+      filtered.forEach((item) => {
+        const key = item.vehicle_type || "Lainnya";
+        counts[key] = (counts[key] || 0) + 1;
+      });
+      const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+      $("resultVehicleChips").innerHTML = entries.length
+        ? entries.map(([name, total]) => {
+            const classes = VEHICLE_STYLE[name] || "bg-slate-800 text-slate-300 border-slate-700";
+            return `<span class="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium ${classes}">${escapeHtml(name)} <strong>${total}</strong></span>`;
+          }).join("")
+        : '<span class="text-xs text-slate-500">Belum ada data</span>';
+
+      const body = $("violationsBody");
+      const cards = $("violationsCards");
+      if (!state.violations.length) {
+        body.innerHTML = emptyRow(7, "Belum ada pelanggaran tercatat.");
+        cards.innerHTML = '<p class="p-6 text-center text-sm text-slate-500">Belum ada pelanggaran tercatat.</p>';
+        return;
+      }
+      if (!rows.length) {
+        body.innerHTML = emptyRow(7, "Tidak ada data yang cocok dengan filter.");
+        cards.innerHTML = '<p class="p-6 text-center text-sm text-slate-500">Tidak ada data yang cocok dengan filter.</p>';
+        return;
+      }
+
+      body.innerHTML = rows.map((violation) => {
+        const unreadable = isUnreadable(violation);
+        return `<tr class="hover:bg-slate-800/30 transition">
+          <td class="p-3">${evidenceThumb(violation)}</td>
+          <td class="p-3">${plateCell(violation)}</td>
+          <td class="p-3">${vehicleBadge(violation.vehicle_type)}</td>
+          <td class="p-3 text-[11px] text-slate-400 whitespace-nowrap">
+            ${Number(violation.time_seconds).toFixed(2)}s
+            <span class="block text-slate-600">frame ${violation.frame_number}</span>
+          </td>
+          <td class="p-3 font-mono text-[10px] text-indigo-300 whitespace-nowrap">${escapeHtml(violation.job_id)}</td>
+          <td class="p-3 text-xs ${unreadable ? "text-slate-500" : "text-slate-300"}">${confidenceText(violation)}</td>
+          <td class="p-3 text-right">
+            <button type="button" data-action="evidence" data-id="${violation.id}" class="text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 transition">Detail</button>
+          </td>
+        </tr>`;
+      }).join("");
+
+      cards.innerHTML = rows.map((violation) => {
+        const source = plateSource(violation);
+        const tone = source === "real" ? "text-emerald-300" : source === "simulated" ? "text-sky-300" : "text-amber-400";
+        return `<article class="p-3 flex gap-3">
+          <div class="shrink-0">${evidenceThumb(violation, "w-24 h-20")}</div>
+          <div class="min-w-0 flex-1">
+            <div class="flex flex-wrap items-center justify-between gap-1.5">
+              <p class="font-mono text-sm font-semibold ${tone}">${escapeHtml(violation.license_plate || "-")}</p>
+              ${vehicleBadge(violation.vehicle_type)}
+            </div>
+            <p class="mt-0.5 flex flex-wrap items-center gap-1 text-[10px] text-slate-500">${plateSourceChip(violation)}<span>${PLATE_SOURCE_STYLE[source].note}</span></p>
+            <p class="text-[10px] text-slate-500 mt-0.5">${source === "real" ? `Confidence ${confidenceText(violation)}` : "Tidak ada confidence OCR yang sah"}</p>
+            <p class="text-[11px] text-slate-400 mt-1">${Number(violation.time_seconds).toFixed(2)}s · frame ${violation.frame_number}</p>
+            <p class="font-mono text-[10px] text-indigo-300 truncate mt-0.5">${escapeHtml(violation.job_id)}</p>
+            <button type="button" data-action="evidence" data-id="${violation.id}" class="mt-1.5 text-[11px] font-semibold text-sky-300 hover:text-sky-200">Lihat bukti →</button>
+          </div>
+        </article>`;
+      }).join("");
+    }
+
+    /* ---------------------------------- Ekspor CSV -------------------------------- */
+
+    function csvCell(value) {
+      const text = String(value ?? "");
+      return `"${text.replace(/"/g, '""')}"`;
+    }
+
+    function exportCsv() {
+      const rows = getFilteredViolations();
+      if (!rows.length) {
+        toast("Tidak ada data untuk diekspor.", "error");
+        return;
+      }
+      const header = ["ID", "Job ID", "Plat Nomor", "Sumber Plat", "Engine OCR", "Format", "Region", "Kendaraan", "Jenis Pelanggaran", "Waktu (detik)", "Frame", "Confidence OCR", "Perlu Verifikasi", "Tercatat"];
+      const lines = [header, ...rows.map((item) => {
+        const source = plateSource(item);
+        return [
+          item.id,
+          item.job_id,
+          item.license_plate,
+          source,
+          item.ocr_engine || "",
+          item.plate_format || "",
+          item.plate_region || "",
+          item.vehicle_type,
+          item.violation_type,
+          Number(item.time_seconds).toFixed(2),
+          item.frame_number,
+          source === "real" ? (Number(item.ocr_confidence) || 0).toFixed(4) : "",
+          item.needs_verification ? "ya" : "tidak",
+          item.created_at || "",
+        ];
+      })];
+      const csv = lines.map((cols) => cols.map(csvCell).join(",")).join("\r\n");
+      const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `pelanggaran-${stamp}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      toast(`${rows.length} data diekspor ke CSV.`, "success");
+    }
+
+    /* ------------------------------- Bukti & video -------------------------------- */
+
+    function openEvidence(id) {
+      const violation = state.violations.find((item) => Number(item.id) === Number(id));
+      if (!violation) return;
+      const url = violation.evidence_image_url || "";
+      const image = $("evidenceImage");
+      image.src = url || placeholderImage();
+      image.alt = `Bukti pelanggaran ${violation.id}`;
+      const download = $("evidenceDownload");
+      if (url) {
+        download.href = url;
+        download.classList.remove("hidden");
+      } else {
+        download.href = "#";
+        download.classList.add("hidden");
+      }
+
+      const source = plateSource(violation);
+      const style = PLATE_SOURCE_STYLE[source];
+      const panel = $("platePanel");
+      const plateImage = $("evidencePlateImage");
+      if (violation.plate_crop_url) {
+        panel.classList.remove("hidden");
+        plateImage.src = violation.plate_crop_url;
+        plateImage.alt = `Crop plat ${violation.license_plate || ""}`.trim();
+      } else {
+        panel.classList.add("hidden");
+        plateImage.removeAttribute("src");
+      }
+      $("evidencePlateSource").innerHTML = `<span class="inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-semibold ${style.classes}">${style.label}</span> <span class="text-slate-400">${style.note}</span>`;
+      $("evidencePlateMeta").textContent = [
+        violation.ocr_engine ? `engine ${violation.ocr_engine}` : "",
+        violation.plate_region ? `region ${violation.plate_region}` : "",
+        violation.plate_format ? `format ${violation.plate_format}` : "",
+        violation.needs_verification ? "perlu verifikasi" : "",
+      ].filter(Boolean).join(" · ") || "metadata plat tidak tersedia";
+
+      const item = (label, value) => `<div class="rounded-lg border border-slate-800 bg-slate-900/80 px-3 py-2">
+        <p class="text-[9px] uppercase tracking-wider text-slate-500">${label}</p>
+        <p class="text-xs text-slate-200 mt-0.5 break-words">${value}</p>
+      </div>`;
+      $("evidenceMeta").innerHTML = [
+        item("Job", `<span class="font-mono text-indigo-300">${escapeHtml(violation.job_id)}</span>`),
+        item("Tracker", `#${violation.tracker_id}`),
+        item("Kendaraan", escapeHtml(violation.vehicle_type || "-")),
+        item("Pelanggaran", escapeHtml(violation.violation_type || "-")),
+        item("Waktu", `${Number(violation.time_seconds).toFixed(2)} detik · frame ${violation.frame_number}`),
+        item("Plat", `<span class="font-mono">${escapeHtml(violation.license_plate || "-")}</span> ${plateSourceChip(violation)}`),
+        item("Confidence", confidenceText(violation)),
+        item("Tercatat", formatDateTime(violation.created_at)),
+      ].join("");
+      const modal = $("evidenceLightbox");
+      modal.classList.remove("hidden");
+      $("closeLightboxBtn").focus();
+    }
+
+    function closeEvidence() {
+      $("evidenceLightbox").classList.add("hidden");
+      $("evidenceImage").removeAttribute("src");
+      $("evidencePlateImage").removeAttribute("src");
+    }
+
+    function openVideoModal(url) {
+      if (!url) return;
+      $("videoModal").classList.remove("hidden");
+      $("modalDownload").href = url;
+      const video = $("modalVideo");
+      video.src = url;
+      video.play().catch(() => {});
+      $("closeModalBtn").focus();
+    }
+
+    function closeVideoModal() {
+      const video = $("modalVideo");
+      video.pause();
+      video.removeAttribute("src");
+      video.load();
+      $("videoModal").classList.add("hidden");
+    }
+
+    /* ---------------------------------- Zona video -------------------------------- */
+
+    function selectedClasses() {
+      return [...document.querySelectorAll(".class-checkbox:checked")].map((input) => Number(input.value));
+    }
+
+    function polygonArea(points) {
+      if (points.length < 3) return 0;
+      let area = 0;
+      for (let index = 0; index < points.length; index += 1) {
+        const [x1, y1] = points[index];
+        const [x2, y2] = points[(index + 1) % points.length];
+        area += x1 * y2 - x2 * y1;
+      }
+      return Math.abs(area / 2);
+    }
+
+    function clamp(value, min, max) {
+      return Math.min(max, Math.max(min, value));
+    }
+
+    function setCheck(id, ok, hint) {
+      const item = $(id);
+      item.className = `flex items-center gap-2 ${ok ? "text-emerald-300" : "text-slate-400"}`;
+      const icon = item.querySelector(".check-icon");
+      icon.textContent = ok ? "✓" : "•";
+      icon.className = `check-icon w-4 h-4 shrink-0 grid place-items-center rounded-full text-[10px] font-bold ${
+        ok
+          ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+          : "bg-slate-800 text-slate-500 border border-slate-700"
+      }`;
+      item.querySelector(".check-hint").textContent = hint;
+    }
+
+    function updateZoneInfo() {
+      const count = state.points.length;
+      const classes = selectedClasses();
+      const canvas = $("zoneCanvas");
+      const area = polygonArea(state.points);
+      const ratio = canvas.width && canvas.height ? area / (canvas.width * canvas.height) : 0;
+
+      $("pointCounter").textContent = `${count} titik`;
+      $("zoneJson").textContent = JSON.stringify(state.points);
+      $("areaInfo").textContent = count >= 3
+        ? `Luas ±${Math.round(area).toLocaleString("id-ID")} px²`
+        : "Luas: -";
+
+      const status = $("zoneStatus");
+      const base = "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium";
+      if (!count) {
+        status.className = `${base} border-amber-500/30 bg-amber-500/10 text-amber-300`;
+        status.textContent = "Belum ada zona";
+      } else if (count < 3) {
+        status.className = `${base} border-amber-500/30 bg-amber-500/10 text-amber-300`;
+        status.textContent = `Butuh ${3 - count} titik lagi`;
+      } else if (ratio < 0.015) {
+        status.className = `${base} border-amber-500/30 bg-amber-500/10 text-amber-300`;
+        status.textContent = "Zona terlalu kecil";
+      } else {
+        status.className = `${base} border-emerald-500/30 bg-emerald-500/10 text-emerald-300`;
+        status.textContent = "Zona siap";
+      }
+
+      const warning = $("zoneWarning");
+      if (count >= 3 && ratio < 0.015) {
+        warning.textContent = "Zona sangat kecil dibanding frame. Kemungkinan kendaraan sulit masuk; perbesar area atau pastikan memang hanya area sempit yang diperiksa.";
+        warning.classList.remove("hidden");
+      } else if (count >= 3 && ratio > 0.92) {
+        warning.textContent = "Zona hampir menutupi seluruh frame. Pastikan area di luar marka tidak ikut terhitung.";
+        warning.classList.remove("hidden");
+      } else {
+        warning.classList.add("hidden");
+      }
+
+      const ready = Boolean(state.file) && count >= 3 && classes.length > 0;
+      $("submitBtn").disabled = !ready;
+
+      setCheck("checkFile", Boolean(state.file), state.file ? state.file.name : "Belum ada");
+      setCheck("checkZone", count >= 3, count >= 3 ? `${count} titik` : `${count}/3 titik`);
+      setCheck("checkClass", classes.length > 0, classes.length ? `${classes.length} kelas` : "Belum dipilih");
+
+      if (ready) {
+        $("submitHint").textContent = `Siap dianalisis: ${count} titik zona, ${classes.length} kelas kendaraan.`;
+        $("submitHint").className = "text-[11px] text-emerald-300";
+      } else {
+        $("submitHint").textContent = "Lengkapi ketiga syarat di atas untuk mengaktifkan analisis.";
+        $("submitHint").className = "text-[11px] text-slate-500";
+      }
+
+      drawCanvas();
+    }
+
+    function drawCanvas() {
+      const canvas = $("zoneCanvas");
+      const context = canvas.getContext("2d");
+      const width = canvas.width || 1;
+      const height = canvas.height || 1;
+
+      context.clearRect(0, 0, width, height);
+      context.fillStyle = "#020617";
+      context.fillRect(0, 0, width, height);
+
+      const video = $("previewVideo");
+      let drewFrame = false;
+      if (video.readyState >= 2 && video.videoWidth) {
+        try {
+          context.drawImage(video, 0, 0, width, height);
+          drewFrame = true;
+        } catch (error) {
+          /* frame belum siap */
+        }
+      }
+
+      if (!drewFrame) {
+        context.save();
+        context.fillStyle = "#0b1220";
+        context.fillRect(0, 0, width, height);
+        context.strokeStyle = "rgba(51, 65, 85, 0.55)";
+        context.lineWidth = 1;
+        for (let x = 0; x < width; x += Math.max(40, width / 16)) {
+          context.beginPath();
+          context.moveTo(x, 0);
+          context.lineTo(x, height);
+          context.stroke();
+        }
+        for (let y = 0; y < height; y += Math.max(40, height / 9)) {
+          context.beginPath();
+          context.moveTo(0, y);
+          context.lineTo(width, y);
+          context.stroke();
+        }
+        context.fillStyle = "#64748b";
+        context.font = `500 ${Math.max(12, Math.round(width / 62))}px Inter, sans-serif`;
+        context.textAlign = "center";
+        context.textBaseline = "middle";
+        context.fillText("Pratinjau frame belum tersedia — Anda tetap bisa menggambar zona", width / 2, height / 2);
+        context.restore();
+      }
+
+      if (!state.points.length) return;
+
+      context.save();
+      context.beginPath();
+      state.points.forEach(([x, y], index) => {
+        if (index === 0) context.moveTo(x, y);
+        else context.lineTo(x, y);
+      });
+      if (state.points.length >= 3) {
+        context.closePath();
+        context.fillStyle = "rgba(239, 68, 68, 0.20)";
+        context.fill();
+      }
+      context.strokeStyle = "#fbbf24";
+      context.lineWidth = Math.max(2, width / 520);
+      context.stroke();
+
+      const radius = Math.max(5, width / 120);
+      const fontSize = Math.max(10, Math.round(width / 48));
+      context.font = `700 ${fontSize}px ui-monospace, monospace`;
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      state.points.forEach(([x, y], index) => {
+        const dragging = state.draggingIndex === index;
+        context.beginPath();
+        context.arc(x, y, dragging ? radius * 1.35 : radius, 0, Math.PI * 2);
+        context.fillStyle = "#ef4444";
+        context.fill();
+        context.strokeStyle = dragging ? "#fde047" : "#fecaca";
+        context.lineWidth = Math.max(2, width / 700);
+        context.stroke();
+        context.fillStyle = "#ffffff";
+        context.fillText(String(index + 1), x, y + 1);
+      });
+      context.restore();
+    }
+
+    function resetZone() {
+      state.points = [];
+      updateZoneInfo();
+    }
+
+    function showPreviewFallback(message) {
+      const canvas = $("zoneCanvas");
+      if (!state.canvasSized) {
+        canvas.width = 1280;
+        canvas.height = 720;
+        state.canvasSized = true;
+      }
+      $("canvasWrap").classList.remove("hidden");
+      $("videoMeta").classList.remove("hidden");
+      $("videoMeta").textContent = message;
+      $("canvasSizeBadge").textContent = `${canvas.width}×${canvas.height} (cadangan)`;
+      $("canvasSizeBadge").classList.remove("hidden");
+      $("frameSlider").disabled = true;
+      $("frameTime").textContent = "pratinjau N/A";
+      updateZoneInfo();
+      toast(
+        "Browser tidak bisa memutar pratinjau video ini (codec). Zona tetap bisa digambar; server tetap memproses video aslinya.",
+        "info"
+      );
+    }
+
+    function applySampleZone() {
+      if (!state.file) {
+        toast("Pilih video terlebih dahulu.", "error");
+        return;
+      }
+      const canvas = $("zoneCanvas");
+      const width = canvas.width || 1280;
+      const height = canvas.height || 720;
+      const base = [[0.18, 0.62], [0.82, 0.62], [0.9, 0.9], [0.1, 0.9]];
+      state.points = base.map(([x, y]) => [
+        Math.round(x * width),
+        Math.round(y * height),
+      ]);
+      updateZoneInfo();
+      toast("Zona demo diterapkan. Seret titik bila ingin menyesuaikan.", "info");
+    }
+
+    function updateFrameTime() {
+      const video = $("previewVideo");
+      const current = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+      const duration = Number.isFinite(video.duration) ? video.duration : 0;
+      $("frameTime").textContent = `${current.toFixed(1)}s / ${duration.toFixed(1)}s`;
+    }
+
+    function handleFile(file) {
+      if (!file) return;
+      if (!/\.(mp4|avi|mkv|mov|m4v)$/i.test(file.name)) {
+        toast("Format video tidak didukung. Gunakan MP4, AVI, MKV, atau MOV.", "error");
+        return;
+      }
+      if (file.size > 500 * 1024 * 1024) {
+        toast("Ukuran video melebihi 500 MB.", "error");
+        return;
+      }
+
+      state.file = file;
+      state.points = [];
+      state.canvasSized = false;
+      state.draggingIndex = null;
+      $("frameSlider").disabled = false;
+      $("canvasSizeBadge").classList.add("hidden");
+      $("videoMeta").classList.remove("hidden");
+      $("videoMeta").textContent = `${file.name} · ${(file.size / (1024 * 1024)).toFixed(1)} MB · membaca metadata...`;
+      updateZoneInfo();
+
+      if (state.objectUrl) URL.revokeObjectURL(state.objectUrl);
+      state.objectUrl = URL.createObjectURL(file);
+
+      const video = $("previewVideo");
+      video.onloadedmetadata = () => {
+        const width = video.videoWidth || 1280;
+        const height = video.videoHeight || 720;
+        const canvas = $("zoneCanvas");
+        canvas.width = width;
+        canvas.height = height;
+        state.canvasSized = true;
+
+        $("canvasWrap").classList.remove("hidden");
+        $("videoMeta").textContent = `${file.name} · ${width}×${height} · ${
+          Number.isFinite(video.duration) ? video.duration.toFixed(1) : "?"
+        } detik · ${(file.size / (1024 * 1024)).toFixed(1)} MB`;
+        $("canvasSizeBadge").textContent = `${width}×${height}`;
+        $("canvasSizeBadge").classList.remove("hidden");
+
+        const start = Number.isFinite(video.duration) && video.duration > 0
+          ? Math.min(video.duration * 0.12, 1.5)
+          : 0;
+        $("frameSlider").value = Number.isFinite(video.duration) && video.duration > 0
+          ? String(Math.round((start / video.duration) * 1000))
+          : "0";
+        if (start) video.currentTime = start;
+        updateFrameTime();
+        updateZoneInfo();
+      };
+      video.onloadeddata = () => drawCanvas();
+      video.onseeked = () => {
+        updateFrameTime();
+        drawCanvas();
+      };
+      video.ontimeupdate = updateFrameTime;
+      video.onerror = () => {
+        // Codec seperti mp4v (MPEG-4 Part 2) tidak didukung browser modern.
+        showPreviewFallback(
+          `${file.name} · pratinjau tidak didukung browser (codec) · koordinat memakai 1280×720. Sesuaikan zona dengan resolusi video asli.`
+        );
+      };
+      video.src = state.objectUrl;
+      video.load();
+
+      updateZoneInfo();
+    }
+
+    function canvasPointFromEvent(event) {
+      const canvas = $("zoneCanvas");
+      const rect = canvas.getBoundingClientRect();
+      if (!rect.width || !rect.height) return null;
+      const x = (event.clientX - rect.left) * (canvas.width / rect.width);
+      const y = (event.clientY - rect.top) * (canvas.height / rect.height);
+      return [clamp(Math.round(x), 0, canvas.width), clamp(Math.round(y), 0, canvas.height)];
+    }
+
+    function findPointIndex(x, y, tolerance) {
+      let best = -1;
+      let bestDistance = Infinity;
+      state.points.forEach(([px, py], index) => {
+        const distance = Math.hypot(px - x, py - y);
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          best = index;
+        }
+      });
+      return bestDistance <= tolerance ? best : -1;
+    }
+
+    function applyZoneJson() {
+      try {
+        const raw = JSON.parse($("zoneJsonInput").value);
+        if (!Array.isArray(raw) || raw.length < 3) {
+          throw new Error("Minimal 3 titik dengan format [[x,y], ...].");
+        }
+        if (!state.file) {
+          throw new Error("Pilih video terlebih dahulu agar ukuran kanvas diketahui.");
+        }
+        const canvas = $("zoneCanvas");
+        const points = raw.map((point) => {
+          if (!Array.isArray(point) || point.length < 2) {
+            throw new Error("Setiap titik harus berupa pasangan [x, y].");
+          }
+          const x = Number(point[0]);
+          const y = Number(point[1]);
+          if (!Number.isFinite(x) || !Number.isFinite(y)) {
+            throw new Error("Koordinat harus berupa angka.");
+          }
+          return [clamp(Math.round(x), 0, canvas.width), clamp(Math.round(y), 0, canvas.height)];
+        });
+        state.points = points;
+        updateZoneInfo();
+        toast("Koordinat zona diterapkan.", "success");
+      } catch (error) {
+        toast(error.message || "JSON tidak valid.", "error");
+      }
+    }
+
+    /* ----------------------------------- Submit ---------------------------------- */
+
+    async function submitJob() {
+      if (!state.file) {
+        toast("Pilih video terlebih dahulu.", "error");
+        return;
+      }
+      if (state.points.length < 3) {
+        toast("Gambar minimal 3 titik untuk membentuk zona.", "error");
+        return;
+      }
+      const classes = selectedClasses();
+      if (!classes.length) {
+        toast("Pilih minimal satu kelas kendaraan.", "error");
+        return;
+      }
+
+      const form = new FormData();
+      form.append("file", state.file, state.file.name);
+      form.append("zone_coordinates", JSON.stringify(state.points));
+      form.append("target_classes", JSON.stringify(classes));
+
+      const button = $("submitBtn");
+      const originalLabel = button.textContent;
+      button.disabled = true;
+      button.textContent = "Mengunggah & mengantrekan...";
+
+      try {
+        const job = await request("/api/v1/jobs", { method: "POST", body: form });
+        toast(`Job ${job.job_id} masuk antrean pemrosesan.`, "success");
+        monitorJob(job.job_id);
+        loadStats();
+        loadJobs();
+      } catch (error) {
+        toast(error.message, "error");
+      } finally {
+        button.textContent = originalLabel;
+        updateZoneInfo();
+      }
+    }
+
+    /* ------------------------------ Job monitoring -------------------------------- */
+
+    function renderActiveJobMode(job = null) {
+      const element = $("activeJobMode");
+      if (job) {
+        const mode = String(job.mode || "legacy").toLowerCase();
+        const simulated = mode === "simulated" || job.mock_ocr || job.mock_pipeline;
+        const legacy = mode === "legacy";
+        const label = legacy ? "LEGACY" : simulated ? "SIMULASI" : "ASLI";
+        const classes = legacy
+          ? "border-slate-600 bg-slate-800 text-slate-300"
+          : simulated
+            ? "border-amber-500/30 bg-amber-500/10 text-amber-300"
+            : "border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
+        element.title = legacy
+          ? "Job lama era OCR simulasi: platnya bukan pembacaan video"
+          : simulated
+            ? "Job ini memakai deteksi/OCR simulasi"
+            : `Deteksi + ALPR asli${job.imgsz ? ` · imgsz ${job.imgsz}` : ""}`;
+        element.className = `inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-[10px] font-semibold ${classes}`;
+        element.textContent = label;
+        element.classList.remove("hidden");
+        return;
+      }
+      if (!state.health) {
+        element.classList.add("hidden");
+        return;
+      }
+      const info = modeInfo();
+      element.title = info.title;
+      element.className = `inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-[10px] font-semibold ${info.classes}`;
+      element.textContent = info.text;
+      element.classList.remove("hidden");
+    }
+
+    function renderActiveJob(job) {
+      $("activeJobId").textContent = job.job_id;
+      $("activeJobStatus").innerHTML = statusBadge(job.status);
+      $("activeJobFile").textContent = job.original_filename || "-";
+      renderActiveJobMode(job);
+
+      const pct = Math.min(100, Math.max(0, Number(job.progress_percentage) || 0));
+      const bar = $("activeJobBar");
+      bar.style.width = `${pct}%`;
+      bar.className = `h-full transition-all duration-500 ${
+        job.status === "FAILED" ? "bg-rose-500" : job.status === "COMPLETED" ? "bg-emerald-500" : "bg-sky-500"
+      }`;
+
+      $("activeJobPercent").textContent = `${pct.toFixed(1)}%`;
+      $("activeJobFrames").textContent = `${job.processed_frames} / ${job.total_frames || "?"}`;
+      $("activeJobViolations").textContent = job.violations_detected;
+
+      const error = $("activeJobError");
+      if (job.error_message) {
+        error.textContent = job.error_message;
+        error.classList.remove("hidden");
+      } else {
+        error.classList.add("hidden");
+      }
+
+      const videoLink = $("activeJobVideo");
+      const downloadLink = $("activeJobDownload");
+      if (job.output_video_url) {
+        videoLink.href = job.output_video_url;
+        downloadLink.href = job.output_video_url;
+        videoLink.classList.remove("hidden");
+        downloadLink.classList.remove("hidden");
+      } else {
+        videoLink.removeAttribute("href");
+        downloadLink.removeAttribute("href");
+        videoLink.classList.add("hidden");
+        downloadLink.classList.add("hidden");
+      }
+    }
+
+    async function pollActiveJob() {
+      if (!state.activeJobId) return;
+      try {
+        const job = await request(`/api/v1/jobs/${encodeURIComponent(state.activeJobId)}`);
+        renderActiveJob(job);
+        if (["COMPLETED", "FAILED"].includes(job.status)) {
+          if (state.pollHandle) {
+            clearInterval(state.pollHandle);
+            state.pollHandle = null;
+          }
+          await Promise.allSettled([loadStats(), loadJobs(), loadViolations()]);
+          if (job.status === "COMPLETED") {
+            const select = $("jobFilter");
+            if ([...select.options].some((option) => option.value === job.job_id)) {
+              select.value = job.job_id;
+              renderViolations();
+              toast(`Analisis selesai: ${job.violations_detected} pelanggaran. Hasil difilter ke job ini.`, "success");
+            } else {
+              toast(`Analisis selesai: ${job.violations_detected} pelanggaran terdeteksi.`, "success");
+            }
+          } else {
+            toast(`Job gagal: ${job.error_message || "tanpa detail"}`, "error");
+          }
+        }
+      } catch (error) {
+        console.error("Gagal memantau job:", error);
+      }
+    }
+
+    function monitorJob(jobId) {
+      state.activeJobId = jobId;
+      const card = $("activeJobCard");
+      card.classList.remove("hidden");
+      card.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (state.pollHandle) clearInterval(state.pollHandle);
+      state.pollHandle = setInterval(pollActiveJob, 1500);
+      pollActiveJob();
+    }
+
+    function toggleFullscreen() {
+      const frame = $("canvasFrame");
+      if (!document.fullscreenElement) {
+        const request = frame.requestFullscreen && frame.requestFullscreen();
+        if (request && request.catch) {
+          request.catch(() => toast("Browser tidak mendukung mode layar penuh.", "error"));
+        }
+      } else {
+        document.exitFullscreen();
+      }
+    }
+
+    /* ----------------------------------- Events ---------------------------------- */
+
+    function focusJobResults(jobId) {
+      const hasData = state.violations.some((item) => item.job_id === jobId);
+      if (!hasData) {
+        toast("Job ini belum memiliki data pelanggaran.", "info");
+        return;
+      }
+      const select = $("jobFilter");
+      if (![...select.options].some((option) => option.value === jobId)) {
+        select.insertAdjacentHTML("beforeend", `<option value="${escapeHtml(jobId)}">${escapeHtml(jobId)}</option>`);
+      }
+      select.value = jobId;
+      renderViolations();
+      $("results").scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
+    function bindEvents() {
+      $("fileInput").addEventListener("change", (event) => {
+        const file = event.target.files && event.target.files[0];
+        handleFile(file);
+        event.target.value = "";
+      });
+
+      const dropzone = $("dropzone");
+      ["dragenter", "dragover"].forEach((eventName) => {
+        dropzone.addEventListener(eventName, (event) => {
+          event.preventDefault();
+          dropzone.classList.add("border-indigo-500", "bg-indigo-500/10");
+        });
+      });
+      ["dragleave", "drop"].forEach((eventName) => {
+        dropzone.addEventListener(eventName, (event) => {
+          event.preventDefault();
+          dropzone.classList.remove("border-indigo-500", "bg-indigo-500/10");
+        });
+      });
+      dropzone.addEventListener("drop", (event) => {
+        const file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
+        handleFile(file);
+      });
+
+      const canvas = $("zoneCanvas");
+      canvas.addEventListener("pointerdown", (event) => {
+        if (!state.file) return;
+        event.preventDefault();
+        const point = canvasPointFromEvent(event);
+        if (!point) return;
+        const rect = canvas.getBoundingClientRect();
+        const tolerance = 18 * (canvas.width / (rect.width || canvas.width));
+        const index = findPointIndex(point[0], point[1], tolerance);
+        if (index >= 0) {
+          state.draggingIndex = index;
+          state.dragPointerId = event.pointerId;
+          try {
+            canvas.setPointerCapture(event.pointerId);
+          } catch (error) {
+            /* pointer capture tidak didukung */
+          }
+        } else {
+          state.points.push(point);
+        }
+        updateZoneInfo();
+      });
+
+      canvas.addEventListener("pointermove", (event) => {
+        if (state.draggingIndex === null) return;
+        event.preventDefault();
+        const point = canvasPointFromEvent(event);
+        if (!point) return;
+        state.points[state.draggingIndex] = point;
+        updateZoneInfo();
+      });
+
+      const endDrag = (event) => {
+        if (state.draggingIndex === null) return;
+        state.draggingIndex = null;
+        if (event && event.pointerId !== undefined) {
+          try {
+            if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+          } catch (error) {
+            /* abaikan */
+          }
+        }
+        state.dragPointerId = null;
+        updateZoneInfo();
+      };
+      canvas.addEventListener("pointerup", endDrag);
+      canvas.addEventListener("pointercancel", endDrag);
+      canvas.addEventListener("pointerleave", (event) => {
+        if (state.draggingIndex !== null && event.buttons === 0) endDrag(event);
+      });
+
+      canvas.addEventListener("dblclick", (event) => {
+        if (!state.file) return;
+        event.preventDefault();
+        const point = canvasPointFromEvent(event);
+        if (!point) return;
+        const rect = canvas.getBoundingClientRect();
+        const tolerance = 18 * (canvas.width / (rect.width || canvas.width));
+        const index = findPointIndex(point[0], point[1], tolerance);
+        if (index >= 0) {
+          state.points.splice(index, 1);
+          updateZoneInfo();
+          toast("Titik dihapus.", "info");
+        }
+      });
+
+      $("frameSlider").addEventListener("input", (event) => {
+        const video = $("previewVideo");
+        if (Number.isFinite(video.duration) && video.duration > 0) {
+          video.currentTime = video.duration * (Number(event.target.value) / 1000);
+          updateFrameTime();
+        }
+      });
+
+      $("undoBtn").addEventListener("click", () => {
+        if (!state.points.length) return;
+        state.points.pop();
+        updateZoneInfo();
+      });
+      $("resetZoneBtn").addEventListener("click", resetZone);
+      $("sampleZoneBtn").addEventListener("click", applySampleZone);
+      $("applyJsonBtn").addEventListener("click", applyZoneJson);
+      $("fullscreenBtn").addEventListener("click", toggleFullscreen);
+
+      const zoneDetails = $("zoneJson").closest("details");
+      if (zoneDetails) {
+        zoneDetails.addEventListener("toggle", () => {
+          if (zoneDetails.open && !$("zoneJsonInput").value.trim()) {
+            $("zoneJsonInput").value = JSON.stringify(state.points);
+          }
+        });
+      }
+
+      document.querySelectorAll(".class-checkbox").forEach((input) => {
+        input.addEventListener("change", updateZoneInfo);
+      });
+
+      $("submitBtn").addEventListener("click", submitJob);
+      $("refreshBtn").addEventListener("click", () => {
+        refreshAll();
+        toast("Data diperbarui.", "info");
+      });
+      $("helpBtn").addEventListener("click", () => {
+        $("faq").scrollIntoView({ behavior: "smooth", block: "start" });
+        const summary = $("faq").querySelector("summary");
+        if (summary) summary.focus();
+      });
+
+      $("jobsBody").addEventListener("click", (event) => {
+        const button = event.target.closest("button[data-action]");
+        if (!button) return;
+        if (button.dataset.action === "monitor") monitorJob(button.dataset.jobId);
+        if (button.dataset.action === "video") openVideoModal(button.dataset.url);
+        if (button.dataset.action === "result") focusJobResults(button.dataset.jobId);
+      });
+
+      $("activeJobVideo").addEventListener("click", (event) => {
+        event.preventDefault();
+        openVideoModal(event.currentTarget.getAttribute("href"));
+      });
+
+      const evidenceTargets = [$("violationsBody"), $("violationsCards")];
+      evidenceTargets.forEach((container) => {
+        container.addEventListener("click", (event) => {
+          const button = event.target.closest('[data-action="evidence"]');
+          if (!button) return;
+          openEvidence(button.dataset.id);
+        });
+      });
+
+      $("searchPlate").addEventListener("input", renderViolations);
+      $("jobFilter").addEventListener("change", renderViolations);
+      $("hideSimulated").addEventListener("change", renderViolations);
+      $("sortOrder").addEventListener("change", renderViolations);
+      $("resultLimit").addEventListener("change", renderViolations);
+      $("exportCsvBtn").addEventListener("click", exportCsv);
+
+      $("closeModalBtn").addEventListener("click", closeVideoModal);
+      $("videoModal").addEventListener("click", (event) => {
+        if (event.target === $("videoModal")) closeVideoModal();
+      });
+      $("closeLightboxBtn").addEventListener("click", closeEvidence);
+      $("evidenceLightbox").addEventListener("click", (event) => {
+        if (event.target === $("evidenceLightbox")) closeEvidence();
+      });
+
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          closeVideoModal();
+          closeEvidence();
+        }
+      });
+
+      document.addEventListener("fullscreenchange", () => {
+        $("fullscreenBtn").textContent = document.fullscreenElement ? "Keluar Layar Penuh" : "Perbesar";
+        drawCanvas();
+      });
+    }
+
+    async function refreshAll() {
+      await Promise.allSettled([loadHealth(), loadStats(), loadJobs(), loadViolations()]);
+    }
+
+    bindEvents();
+    updateZoneInfo();
+    refreshAll();
+    setInterval(() => {
+      loadHealth();
+      loadStats();
+      loadJobs();
+      loadViolations();
+    }, 6000);
+  </script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+# Normalise text files, keep binaries intact.
+* text=auto eol=lf
+
+*.py    text
+*.md    text
+*.yml   text
+*.yaml  text
+*.json  text
+*.txt   text
+*.html  text
+*.css   text
+*.js    text
+
+*.mp4   binary
+*.jpg   binary
+*.jpeg  binary
+*.png   binary
+*.woff2 binary
+*.pt    binary
+
+# Vendored assets and generated CSS should not clutter diffs.
+static/assets/*.css linguist-generated=true
+index.html linguist-documentation=false

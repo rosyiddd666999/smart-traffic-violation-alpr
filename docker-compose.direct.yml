@@ -1,0 +1,11 @@
+# Overlay untuk pengujian dari jaringan lokal (tanpa Cloudflare Tunnel).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.direct.yml up -d
+#   -> http://<IP-server>:8011  (basic auth tetap aktif)
+#
+# Basic auth TIDAK dimatikan di sini; jangan pernah mengekspos port ini ke
+# internet secara langsung. Butuh Docker Compose v2.24+ (dukungan !override).
+services:
+  caddy:
+    ports: !override
+      - "${APP_PORT:-8011}:80"
