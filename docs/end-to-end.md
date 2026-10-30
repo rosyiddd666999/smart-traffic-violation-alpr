@@ -989,20 +989,42 @@ Measured on the reference homelab:
 | VRAM | tensors / peak process | ~92 MB / ~667 MiB |
 | ALPR | fast-alpr, CPU (`OCR_GPU=false`) | ~0.98 confidence on clear plates |
 | End-to-end | 120-frame test clip | ~13 s |
-| End-to-end | 538-frame 4K clip, `imgsz=1280` | ~7.5 min including CPU ALPR |
+| End-to-end | 538-frame 4K clip, `imgsz=1280` | ~1.3 min (77 s, 143 ms/frame) |
 | Public request | Cloudflare edge → Traefik → Caddy | ~160 ms, HTTP/2 |
+
+Per-stage breakdown of that 538-frame 4K run (10 violations, warm model cache):
+
+| Stage | Total | Per frame | Share |
+|---|---|---|---|
+| Decode | 9.9 s | 18.3 ms | 13 % |
+| YOLO detection (`track`, `imgsz=1280`) | 27.4 s | 50.7 ms | 36 % |
+| Frame annotation (4K canvas) | 11.6 s | 21.4 ms | 15 % |
+| Encoder backpressure (`libx264` 3840×2160) | 13.0 s | 24.1 ms | 17 % |
+| CPU ALPR (post-pass, 10 vehicles / 55 crops) | 9.6 s | — | 12 % |
+| DB, evidence images, model load | 5.7 s | — | 7 % |
 
 Interpretation:
 
-- Detection is not the bottleneck on a 4K clip; ALPR on CPU and H.264 encoding
-  dominate.
-- The 4K clip is processed frame-by-frame at 1280 inference resolution. The
-  output video keeps 3840×2160, which is expensive to encode. Downscaling the
-  source before upload is the cheapest speedup if 4K evidence is not required.
+- Detection is the largest per-frame stage (~36 %), followed by the H.264
+  encoder and frame compositing. ALPR is ~12 % and scales with the number of
+  violations, not with clip length.
+- Annotation used to cost ~83 ms/frame because the zone and header overlays were
+  blended over the whole 4K frame. Blending only inside the polygon bounding box
+  and the header band produces pixel-identical output at ~21 ms/frame, which
+  brings the whole job from 111 s to 77 s.
+- Decoding in a background thread was measured as a wash on this 4-core CPU:
+  the overlap is offset by contention with detection preprocessing, so the
+  pipeline keeps the simple sequential loop.
+- The output video keeps 3840×2160. Downscaling the source before upload is the
+  cheapest further speedup if 4K evidence is not required; the evidence crops
+  are cut from the original frame, so they stay full resolution either way.
 - `FRAME_STRIDE=2` roughly halves the work, at the cost of ALPR samples and
   brief-crossing recall.
 - The dashboard is a single page with small static assets; the expensive part is
   polling job status and loading evidence thumbnails.
+- `scripts/bench_pipeline.py` measures decode, detection at several `imgsz`,
+  annotation and encoding on any clip, and reports detection agreement relative
+  to the highest resolution tested.
 
 ### 15.1 Detection accuracy (COCO sanity check)
 

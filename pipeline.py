@@ -216,9 +216,17 @@ def _annotate_frame(
     height, width = annotated.shape[:2]
     contour = np.array(polygon, dtype=np.int32).reshape(-1, 1, 2)
 
-    overlay = annotated.copy()
-    cv2.fillPoly(overlay, [contour], (0, 140, 255))
-    cv2.addWeighted(overlay, 0.18, annotated, 0.82, 0, annotated)
+    # Blending dibatasi ke kotak pembatas zona, bukan seluruh frame.
+    # addWeighted penuh pada frame 4K memakan ~90 ms/frame padahal piksel di
+    # luar poligon tidak berubah (0.18a + 0.82a == a), jadi hasilnya identik.
+    rx, ry, rw, rh = cv2.boundingRect(contour)
+    rx2 = min(width, rx + rw)
+    ry2 = min(height, ry + rh)
+    if rx2 > rx and ry2 > ry:
+        region = annotated[ry:ry2, rx:rx2]
+        overlay = region.copy()
+        cv2.fillPoly(overlay, [contour - [rx, ry]], (0, 140, 255))
+        cv2.addWeighted(overlay, 0.18, region, 0.82, 0, region)
     cv2.polylines(annotated, [contour], True, (0, 190, 255), 2, cv2.LINE_AA)
 
     font_scale = max(0.4, min(0.9, width / 1600.0))
@@ -275,9 +283,13 @@ def _annotate_frame(
             )
 
     bar_height = max(46, int(height * 0.075))
-    top_overlay = annotated.copy()
-    cv2.rectangle(top_overlay, (0, 0), (width, bar_height), (15, 23, 42), -1)
-    cv2.addWeighted(top_overlay, 0.82, annotated, 0.18, 0, annotated)
+    # cv2.rectangle menggambar inklusif sampai (width, bar_height), jadi bar
+    # yang ter-blend setinggi bar_height + 1 baris (dipotong tinggi frame).
+    band_height = min(bar_height + 1, height)
+    band = annotated[0:band_height, :]
+    band_overlay = band.copy()
+    cv2.rectangle(band_overlay, (0, 0), (width, bar_height), (15, 23, 42), -1)
+    cv2.addWeighted(band_overlay, 0.82, band, 0.18, 0, band)
 
     mode = " | MOCK MODE" if settings.mock_pipeline else ""
     title = f"JOB {job_id} | FRAME {frame_index + 1}/{total_frames or '?'}{mode}"
