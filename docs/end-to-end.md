@@ -985,7 +985,7 @@ Measured on the reference homelab:
 | Component | Configuration | Result |
 |---|---|---|
 | GPU | NVIDIA GTX 1050 Ti, 4 GB, Pascal `sm_61` | CUDA available |
-| Detection | YOLO11n, `imgsz=960`, warm | ~0.025 s/frame (~40 FPS) |
+| Detection | YOLO11n single-frame predict from 4K, `imgsz=960`, warm | ~0.025 s/frame |
 | VRAM | tensors / peak process | ~92 MB / ~667 MiB |
 | ALPR | fast-alpr, CPU (`OCR_GPU=false`) | ~0.98 confidence on clear plates |
 | End-to-end | 120-frame test clip | ~13 s |
