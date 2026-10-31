@@ -40,8 +40,11 @@ lapisan autentikasi; Traefik hanya meneruskan request.
 | Mode | Hybrid: YOLO GPU, ALPR/OCR CPU |
 | Data | 15 job, 58 violation, ±344 MB |
 
-Desktop GUI tetap aktif. GNOME/Xorg ikut memakai VRAM, jadi mulai dari
-`IMGSZ=960`; turunkan ke `640` bila terjadi OOM.
+Desktop GUI tetap aktif. GNOME/Xorg ikut memakai VRAM, tetapi YOLO11n hanya
+memakai ~100 MB tensor pada `imgsz=1280`, jadi headroom-nya masih longgar.
+Biarkan `IMGSZ` kosong agar resolusinya menyesuaikan lebar video (640 untuk
+sumber kecil, 960 untuk 1080p, 1280 untuk 4K); paksa `640` hanya bila benar-benar
+terjadi OOM.
 
 ## 2. File yang dipakai
 
@@ -117,7 +120,8 @@ DATABASE_URL=sqlite:////data/violations.db
 
 DEVICE=0
 OCR_GPU=false
-IMGSZ=960
+# Kosong = adaptive: 640 / 960 / 1280 mengikuti lebar video.
+IMGSZ=
 FRAME_STRIDE=1
 
 MAX_UPLOAD_MB=95
@@ -310,19 +314,39 @@ Ciri respons benar: header `www-authenticate: Basic realm="restricted"` dan
 `server: cloudflare`. Kalau yang muncul halaman 404 Cloudflare, berarti ingress
 tunnel belum memuat hostname tersebut.
 
-### 9.6 Performa acuan (GTX 1050 Ti, `IMGSZ=960`)
+### 9.6 Performa acuan (GTX 1050 Ti, `IMGSZ` adaptive)
 
-Diukur pada `nakamaserver` dengan frame 720p dari `vehicles.mp4`:
+Ada dua jenis angka yang berbeda dan sering tertukar. Jangan bandingkan
+keduanya.
+
+**Inferensi satu frame** (sumber 4K, `predict()` tanpa tracker, `imgsz=960`):
 
 | Metrik | Nilai |
 |---|---|
-| YOLO warm inference | ±0,025 s/frame (±40 FPS) |
+| YOLO warm inference | ±0,025 s/frame |
 | VRAM tensor YOLO | ±92 MB |
 | VRAM total GPU (termasuk GUI) | ±660 MiB dari 4096 MiB |
 | Latensi publik dari edge CGK | ±160 ms |
 | ALPR | CPU, plat contoh `B 1234 XYZ` confidence 0,98 |
 
-Headroom VRAM masih ±3,3 GB, jadi `IMGSZ=960` tidak perlu diturunkan.
+**Job penuh** (klip 4K 3840×2160, 538 frame, `imgsz=1280`, 10 pelanggaran,
+cache model hangat):
+
+| Tahap | Total | Per frame | Porsi |
+|---|---|---|---|
+| Decode | 9,9 s | 18,3 ms | 13 % |
+| Deteksi (`track` + ByteTrack) | 27,4 s | 50,7 ms | 36 % |
+| Anotasi frame | 11,6 s | 21,4 ms | 15 % |
+| Encoder `libx264` 4K | 13,0 s | 24,1 ms | 17 % |
+| ALPR CPU (10 kendaraan) | 9,6 s | — | 12 % |
+| DB + evidence + load model | 5,7 s | — | 7 % |
+| **Total** | **77–82 s** | 143–153 ms | 100 % |
+
+Headroom VRAM masih ±3,3 GB, jadi `imgsz=1280` tidak perlu diturunkan. Deteksi
+adalah tahap terbesar (±36 %); menaikkan ke `1536` hanya menambah ±13 ms/frame
+untuk objek yang jauh lebih kecil daripada kendaraan di garis stop, jadi
+`1280` sudah titik seimbangnya. Job pertama setelah container dibuat akan
+terasa lebih lama karena model plat diunduh dan dimuat ke cache.
 
 ## 10. Cloudflare Tunnel
 
@@ -422,7 +446,8 @@ Pakai `opportunistic`, bukan `yes`, agar DNS tetap jalan bila port 853 diblokir.
 Mulai:
 
 ```ini
-IMGSZ=960
+# Kosong = adaptive (640 / 960 / 1280 sesuai lebar video).
+IMGSZ=
 FRAME_STRIDE=1
 ```
 

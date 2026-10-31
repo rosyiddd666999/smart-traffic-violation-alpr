@@ -989,7 +989,7 @@ Measured on the reference homelab:
 | VRAM | tensors / peak process | ~92 MB / ~667 MiB |
 | ALPR | fast-alpr, CPU (`OCR_GPU=false`) | ~0.98 confidence on clear plates |
 | End-to-end | 120-frame test clip | ~13 s |
-| End-to-end | 538-frame 4K clip, `imgsz=1280` | ~1.3 min (77 s, 143 ms/frame) |
+| End-to-end | 538-frame 4K clip, `imgsz=1280` | ~1.4 min (77–82 s, 143–153 ms/frame) |
 | Public request | Cloudflare edge → Traefik → Caddy | ~160 ms, HTTP/2 |
 
 Per-stage breakdown of that 538-frame 4K run (10 violations, warm model cache):
@@ -1002,6 +1002,10 @@ Per-stage breakdown of that 538-frame 4K run (10 violations, warm model cache):
 | Encoder backpressure (`libx264` 3840×2160) | 13.0 s | 24.1 ms | 17 % |
 | CPU ALPR (post-pass, 10 vehicles / 55 crops) | 9.6 s | — | 12 % |
 | DB, evidence images, model load | 5.7 s | — | 7 % |
+
+The same job replayed inside the deployed container measured 82.4 s
+(153 ms/frame); the spread comes from the production volume and database rather
+than from the code. Both runs used the same clip and zone.
 
 Interpretation:
 

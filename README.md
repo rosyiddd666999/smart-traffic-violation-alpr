@@ -19,7 +19,7 @@ Tunnel in front. It runs on a 4 GB GTX 1050 Ti.
 
 ## Demo
 
-[![Evidence detail](docs/assets/screenshots/evidence-detail.png)](docs/assets/screenshots/evidence-detail.png)
+[![Evidence detail](docs/assets/screenshots/evidence-detail.jpg)](docs/assets/screenshots/evidence-detail.jpg)
 
 [▶ Watch the annotated demo (720p, 1.3 MB)](docs/assets/videos/demo-detection-720p.mp4) ·
 [Download the synthetic input clip](docs/assets/videos/sample-traffic.mp4)
@@ -200,20 +200,22 @@ Measured on the reference machine (GTX 1050 Ti 4 GB, Pascal `sm_61`):
 
 | Workload | Result |
 |---|---|
-| YOLO11n detection, `imgsz=960`, warm | ~0.025 s/frame (~40 FPS) |
+| YOLO11n single-frame predict from a 4K frame, `imgsz=960`, warm | ~0.025 s/frame |
 | VRAM: tensors / peak process | ~92 MB / ~667 MiB |
 | 120-frame end-to-end test | ~13 s |
-| 538-frame 4K clip, `imgsz=1280`, CPU ALPR | ~1.3 min (77 s, 143 ms/frame) |
+| 538-frame 4K clip, `imgsz=1280`, CPU ALPR | ~1.4 min (77–82 s, 143–153 ms/frame) |
 | Public request through the tunnel | ~160 ms, HTTP/2 |
 
 ALPR runs on CPU on this GPU because the available `onnxruntime-gpu` build does
 not provide `sm_61` kernels. Newer GPUs can set `OCR_GPU=true`.
 
-On the 4K clip at `imgsz=1280`, the 143 ms/frame splits into detection (~51 ms),
-decode (~18 ms), annotation (~21 ms) and encoder backpressure (~24 ms), plus
-~10 s of CPU ALPR for the 10 violating vehicles (warm model cache; the first
-job also downloads the plate models). `scripts/bench_pipeline.py` reproduces
-the split on your own footage without touching the database.
+At ~150 ms/frame the 4K run splits into tracked detection (~51 ms), decode
+(~18 ms), annotation (~21 ms) and encoder backpressure (~24 ms), plus ~10 s of
+CPU ALPR for the 10 violating vehicles (warm model cache; the first job also
+downloads the plate models). `scripts/bench_pipeline.py` reproduces the split
+on your own footage without touching the database. The same frame costs ~51 ms
+through `model.track()` versus ~26 ms for a single `predict()` call, because
+ByteTrack and the 4K letterbox are part of every pipeline frame.
 
 ---
 
